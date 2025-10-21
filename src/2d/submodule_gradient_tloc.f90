@@ -26,7 +26,9 @@ contains
     !
     !> Compute gradients shot by shot for TLOC-AD
     !
-    module subroutine compute_gradient_shots_tloc
+    module subroutine compute_gradient_shots_tloc(phase_label)
+
+        character(len=*), intent(in), optional :: phase_label
 
         real, allocatable, dimension(:, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
@@ -37,9 +39,12 @@ contains
         real, allocatable, dimension(:, :) :: vp, vs, sx, sz, st0
         character(len=1024) :: dir_field
 
-        ! temporary directory
+        ! Set up directories - respect pre-set dir_synthetic for trials
+        if (len_trim(dir_synthetic) == 0 .or. index(trim(dir_synthetic), 'iteration') == 0) then
+            dir_synthetic = dir_iter_synthetic(iter)
+        end if
+
         dir_scratch = tidy(dir_working)//'/scratch'
-        dir_synthetic = dir_iter_synthetic(iter)
         dir_field = dir_iter_record(iter)
         if (rankid == 0) then
             call make_directory(dir_synthetic)
@@ -415,7 +420,9 @@ contains
     !
     !> Compute gradients shot by shot for TLOC-DD
     !
-    module subroutine compute_gradient_shots_tloc_dd
+    module subroutine compute_gradient_shots_tloc_dd(phase_label)
+
+        character(len=*), intent(in), optional :: phase_label
 
         real, allocatable, dimension(:, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
@@ -427,9 +434,12 @@ contains
         character(len=1024) :: dir_field
         real, allocatable, dimension(:, :) :: tpsyn_all, tssyn_all, tpobs_all, tsobs_all
 
-        ! temporary directory
+        ! Set up directories - respect pre-set dir_synthetic for trials
+        if (len_trim(dir_synthetic) == 0 .or. index(trim(dir_synthetic), 'iteration') == 0) then
+            dir_synthetic = dir_iter_synthetic(iter)
+        end if
+
         dir_scratch = tidy(dir_working)//'/scratch'
-        dir_synthetic = dir_iter_synthetic(iter)
         dir_field = dir_iter_record(iter)
         if (rankid == 0) then
             call make_directory(dir_synthetic)

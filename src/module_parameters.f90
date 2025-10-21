@@ -101,6 +101,9 @@ module parameters
     real :: step_scaling_factor
     real :: step_max_scale_factor = 1.0
 
+    ! control step size finalization method
+    logical :: use_final_forward_model = .true.
+
     ! data misfit arrays
     real, allocatable, dimension(:) :: step_misfit
     real, allocatable, dimension(:) :: data_misfit
@@ -158,6 +161,7 @@ module parameters
     logical :: yn_continue_inv = .false.
     logical :: yn_enforce_update = .false.
     logical :: put_synthetic_in_scratch = .false.
+    logical :: clear_scratch = .true.
 
     character(len=32), allocatable, dimension(:) :: record_processing
     character(len=32), allocatable, dimension(:) :: encoded_record_processing
@@ -373,6 +377,20 @@ contains
         call readpar_int(file_parameter, 'adp_taperz', space_taperz, 0)
 
         call readpar_string(file_parameter, 'step_size_method', step_size_method, 'linear')
+        
+        call readpar_logical(file_parameter, 'use_final_forward_model', &
+            use_final_forward_model, .true.)
+        
+        if (rankid == 0) then
+            if (use_final_forward_model) then
+                call warn(date_time_compact() &
+                    //' Step size finalization: FINAL FORWARD MODEL (exact consistency)')
+            else
+                call warn(date_time_compact() &
+                    //' Step size finalization: COPY BEST TRIAL (efficient)')
+            end if
+        end if
+        
         call readpar_logical(file_parameter, 'yn_precond', yn_precond, .true.)
         call readpar_float(file_parameter, 'precond_eps', precond_eps, 1.0e-4)
 
@@ -380,6 +398,8 @@ contains
         call readpar_string(file_parameter, 'dir_snapshot', dir_snapshot, './snapshot')
         call readpar_string(file_parameter, 'dir_synthetic', dir_synthetic, './data_synthetic')
         call assert(dir_snapshot /= dir_synthetic, ' <read_parameters> Error: dir_snapshot and dir_synthetic cannot be the same. ')
+
+        call readpar_logical(file_parameter, 'clear_scratch', clear_scratch, .true.)
 
         call readpar_logical(file_parameter, 'verbose', verbose, .false.)
         call readpar_float(file_parameter, 'sweep_stop_threshold', sweep_stop_threshold, 1.0e-4)
@@ -599,6 +619,9 @@ contains
 
             if (l == 0) then
                 gmtr(i)%ns = 0
+                if (rankid == 0) then
+                    call warn(date_time_compact()//' Warning: Shot '//num2str(i)//' (ID: '//num2str(gmtr(i)%id)//') removed - no valid sources')
+                end if
             end if
 
             ! Check receiver
@@ -627,11 +650,13 @@ contains
                 end if
 
             end do
-            close (4)
 
             ! check if any receiver in the model
             if (l == 0) then
                 gmtr(i)%nr = 0
+                if (rankid == 0) then
+                    call warn(date_time_compact()//' Warning: Shot '//num2str(i)//' (ID: '//num2str(gmtr(i)%id)//') removed - no valid receivers')
+                end if
             end if
 
         end do
@@ -672,6 +697,9 @@ contains
                 do i = 1, ns
                     if (gmtr(i)%ns /= 0 .and. gmtr(i)%nr /= 0 .and. qs(i) .and. any(src_exclude == i)) then
                         qs(i) = .false.
+                        if (rankid == 0) then
+                            call warn(date_time_compact()//' Warning: Shot '//num2str(i)//' (ID: '//num2str(gmtr(i)%id)//') excluded by src_exclude')
+                        end if
                     end if
                 end do
             end if
@@ -682,6 +710,9 @@ contains
                 do i = 1, ns
                     if (gmtr(i)%ns /= 0 .and. gmtr(i)%nr /= 0 .and. qs(i) .and. any(sid_exclude == gmtr(i)%id)) then
                         qs(i) = .false.
+                        if (rankid == 0) then
+                            call warn(date_time_compact()//' Warning: Shot '//num2str(i)//' (ID: '//num2str(gmtr(i)%id)//') excluded by sid_exclude')
+                        end if
                     end if
                 end do
             end if

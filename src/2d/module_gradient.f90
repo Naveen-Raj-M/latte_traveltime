@@ -32,15 +32,26 @@ module gradient
     interface
         module subroutine compute_gradient_shots_fatt
         end subroutine
+
         module subroutine compute_gradient_shots_trtt
         end subroutine
-        module subroutine compute_gradient_shots_tloc
+
+        module subroutine compute_gradient_shots_tloc(phase_type)
+            integer, intent(in), optional :: phase_type
         end subroutine
-        module subroutine compute_gradient_shots_tloc_dd
+
+        module subroutine compute_gradient_shots_tloc_dd(phase_type)
+            integer, intent(in), optional :: phase_type
         end subroutine
+
         module subroutine compute_image_shots
         end subroutine
     end interface
+
+    ! Phase type constants
+    integer, parameter :: PHASE_BASELINE = 0
+    integer, parameter :: PHASE_TRIAL = 1
+    integer, parameter :: PHASE_FINAL = 2
 
     private
 
@@ -49,6 +60,7 @@ module gradient
     public :: process_gradient
     public :: output_gradient
     public :: compute_image_shots
+    public :: PHASE_BASELINE, PHASE_TRIAL, PHASE_FINAL
 
 contains
 
@@ -77,7 +89,15 @@ contains
     !
     !> Compute gradients shot by shot
     !
-    subroutine compute_gradient_shots
+    subroutine compute_gradient_shots(phase_type, trial_num)
+        integer, intent(in), optional :: phase_type
+        integer, intent(in), optional :: trial_num
+
+        integer :: ptype
+
+        ! Default to baseline
+        ptype = PHASE_BASELINE
+        if (present(phase_type)) ptype = phase_type
 
         select case (which_program)
             case ('fatt')
@@ -86,9 +106,9 @@ contains
                 call compute_gradient_shots_trtt
             case ('tloc')
                 if (yn_dd_no_st0) then
-                    call compute_gradient_shots_tloc_dd
+                    call compute_gradient_shots_tloc_dd(ptype)
                 else
-                    call compute_gradient_shots_tloc
+                    call compute_gradient_shots_tloc(ptype)
                 end if
         end select
 

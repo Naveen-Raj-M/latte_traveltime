@@ -20,13 +20,17 @@
 submodule(gradient) gradient_tloc
 
     use traveltime_iso
+    use utility
 
 contains
 
     !
     !> Compute gradients shot by shot for TLOC-AD
+    !> MODIFIED: Ensures baseline synthetic is written to correct location
     !
-    module subroutine compute_gradient_shots_tloc
+    module subroutine compute_gradient_shots_tloc(phase_type)
+
+        integer, intent(in), optional :: phase_type
 
         real, allocatable, dimension(:, :, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
@@ -36,14 +40,49 @@ contains
         real :: dxt, dyt, dzt
         real, allocatable, dimension(:, :, :) :: vp, vs, sx, sy, sz, st0
         character(len=1024) :: dir_field
+        character(len=32) :: label
+        integer :: ptype
+        logical :: is_baseline, is_final
 
-        ! temporary directory
+        ! Get phase type (default to baseline = 0)
+        ptype = 0
+        if (present(phase_type)) ptype = phase_type
+
+        ! Set label based on phase type
+        select case (ptype)
+            case (0)
+                label = 'Baseline'
+            case (1)
+                label = 'Trial'
+            case (2)
+                label = 'Final'
+            case default
+                label = 'Baseline'
+        end select
+
+        is_baseline = (ptype == 0)
+        is_final = (ptype == 2)
+
+        if (rankid == 0) then
+            call warn(date_time_compact()//' Phase: '//trim(label)//' (type='//num2str(ptype)//')')
+        end if
+
+        ! Force-reset for Baseline/Final; preserve explicit trial dirs
+        if (is_baseline .or. is_final) then
+            dir_synthetic = dir_iter_synthetic(iter)
+        else
+            if (len_trim(dir_synthetic) == 0) dir_synthetic = dir_iter_synthetic(iter)
+        end if
+
         dir_scratch = tidy(dir_working)//'/scratch'
-        dir_synthetic = dir_iter_synthetic(iter)
         dir_field = dir_iter_record(iter)
+        
         if (rankid == 0) then
             call make_directory(dir_synthetic)
             call make_directory(dir_scratch)
+            
+            call warn(date_time_compact()//' Forward modeling will write to: ' &
+                //tidy(dir_synthetic))
         end if
         call mpibarrier
 
@@ -113,7 +152,22 @@ contains
 
         call mpibarrier
 
-        ! Forward modeling to compute misfit
+        ! ═══════════════════════════════════════════════════════════════
+        ! FORWARD MODELING PHASE
+        ! This is the BASELINE forward model that will be used for:
+        ! 1. Gradient computation
+        ! 2. Baseline misfit (data_misfit(iter))
+        ! 3. Stored in dir_synthetic(iter) as the AUTHORITATIVE synthetic
+        ! ═══════════════════════════════════════════════════════════════
+        
+        if (rankid == 0) then
+            call warn(' ')
+            call warn(date_time_compact()//' ═══════════════════════════════════════════════════')
+            call warn(date_time_compact()//' ' // trim(label) // ' (Iteration ' // num2str(iter) // ')')
+            call warn(date_time_compact()//' ═══════════════════════════════════════════════════')
+
+        end if
+
         do ishot = shot_in_rank(rankid, 1), shot_in_rank(rankid, 2)
 
             ! Updated virtual receiver (real source) information
@@ -135,12 +189,19 @@ contains
             ! Set adaptive range
             call set_adaptive_model_range(gmtr(ishot))
 
+            ! ═══════════════════════════════════════════════════════════
+            ! FORWARD MODELING - WRITES TO dir_synthetic(iter)
+            ! This is the BASELINE synthetic for this iteration
+            ! ═══════════════════════════════════════════════════════════
+            
             select case (which_medium)
 
                 case ('acoustic-iso')
                     call forward_iso( &
                         vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                         [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, ttp_syn)
+
+                    ! Write to BASELINE directory
                     call output_array(ttp_syn, tidy(dir_synthetic)// &
                         '/shot_'//num2str(gmtr(ishot)%id)//'_traveltime_p.bin')
 
@@ -151,6 +212,8 @@ contains
                     call forward_iso( &
                         vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                         [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, tts_syn)
+
+                    ! Write to BASELINE directory
                     call output_array(ttp_syn, tidy(dir_synthetic)// &
                         '/shot_'//num2str(gmtr(ishot)%id)//'_traveltime_p.bin')
                     call output_array(tts_syn, tidy(dir_synthetic)// &
@@ -158,11 +221,10 @@ contains
 
             end select
 
-            call warn(date_time_compact()//' Shot '//num2str(gmtr(ishot)%id) &
-                //' traveltime computation is done. ')
+            call warn(date_time_compact()//' Shot ' // trim(num2str(gmtr(ishot)%id)) // ' ' // trim(label) // ' traveltime computation is done. ')
 
+            ! Copy initial iteration synthetic data to iteration_0 if needed
             if (sum(data_misfit) == 0) then
-                ! Copy initial iteration synthetic data to dir_working/iteration_0
                 call make_directory(dir_iter_synthetic(0))
                 select case (which_medium)
                     case ('acoustic-iso', 'acoustic-tti')
@@ -187,30 +249,42 @@ contains
                 end if
             end if
 
+            ! ═══════════════════════════════════════════════════════════
+            ! COMPUTE BASELINE MISFIT
+            ! This misfit corresponds to the synthetic data just written
+            ! ═══════════════════════════════════════════════════════════
+            
             step_misfit(ishot) = 0
             select case (which_medium)
                 case ('acoustic-iso', 'acoustic-tti')
-                    call compute_shot_misfit(ishot, dir_field, 'p', ttp_syn, ttp_obs, ttp_residual, step_misfit(ishot))
+                    call compute_shot_misfit(ishot, dir_field, 'p', ttp_syn, ttp_obs, &
+                        ttp_residual, step_misfit(ishot))
                 case ('elastic-iso', 'elastic-tti')
-                    call compute_shot_misfit(ishot, dir_field, 'p', ttp_syn, ttp_obs, ttp_residual, step_misfit(ishot))
-                    call compute_shot_misfit(ishot, dir_field, 's', tts_syn, tts_obs, tts_residual, step_misfit(ishot))
+                    call compute_shot_misfit(ishot, dir_field, 'p', ttp_syn, ttp_obs, &
+                        ttp_residual, step_misfit(ishot))
+                    call compute_shot_misfit(ishot, dir_field, 's', tts_syn, tts_obs, &
+                        tts_residual, step_misfit(ishot))
             end select
 
-            call warn(date_time_compact()//' >> Shot '//num2str(gmtr(ishot)%id) &
-                //' misfit = '//num2str(step_misfit(ishot), '(es)'))
+            call warn(date_time_compact()//' >> Shot '//trim(num2str(gmtr(ishot)%id)) &
+                //' ' // trim(label) // ' misfit = ' // num2str(step_misfit(ishot), '(es)'))
+
 
             if (yn_misfit_only) then
                 cycle
             end if
 
-            ! Adjoint modeling to compute gradient
+            ! ═══════════════════════════════════════════════════════════
+            ! ADJOINT MODELING FOR GRADIENT
+            ! Uses the baseline traveltime field just computed
+            ! ═══════════════════════════════════════════════════════════
+            
             select case (which_medium)
 
                 case ('acoustic-iso')
 
                     do i = 1, nmodel
 
-                        ! Update model parameters, if necessary
                         if (model_name(i) == 'vp') then
 
                             ! Compute adjoint-state field
@@ -220,20 +294,14 @@ contains
                                 ttp_residual, lam)
 
                             if (yn_precond) then
-
-                                ! Compute preconditioner
                                 call adjoint_iso( &
                                     vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
                                     -ones_like(ttp_residual), energy)
                                 energy = -energy
-
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
-
                             else
-
                                 lam = -lam/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
-
                             end if
 
                             if (uniform_processing) then
@@ -242,10 +310,7 @@ contains
                                 call process_model_single_shot(ishot, model_grad(i)%array, lam, 'grad_'//model_name(1))
                             end if
 
-                            ! Update source parameters
                         else if (model_name(i) == 'sx') then
-                            ! grad_sx = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂x, is a scalar value at each virtual receiver
-
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
                             do j = 1, gmtr(ishot)%nr
                                 irx = nint((sx(j, 1, 1) - shot_xbeg)/dx) + 1
@@ -257,8 +322,6 @@ contains
                             !$omp end parallel do
 
                         else if (model_name(i) == 'sy') then
-                            ! grad_sy = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂y, is a scalar value at each virtual receiver
-
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
                             do j = 1, gmtr(ishot)%nr
                                 irx = nint((sx(j, 1, 1) - shot_xbeg)/dx) + 1
@@ -270,8 +333,6 @@ contains
                             !$omp end parallel do
 
                         else if (model_name(i) == 'sz') then
-                            ! grad_sz = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂z, is a scalar value at each virtual receiver
-
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
                             do j = 1, gmtr(ishot)%nr
                                 irx = nint((sx(j, 1, 1) - shot_xbeg)/dx) + 1
@@ -283,8 +344,6 @@ contains
                             !$omp end parallel do
 
                         else if (model_name(i) == 'st0') then
-                            ! grad_st0 = (t_syn - (t_obs - t_0))*δ(x - x_vr)
-
                             !$omp parallel do private(j)
                             do j = 1, gmtr(ishot)%nr
                                 model_grad(i)%array(j, 1, 1) = model_grad(i)%array(j, 1, 1) + ttp_residual(j, 1)
@@ -302,31 +361,22 @@ contains
 
                     do i = 1, nmodel
 
-                        ! Update model parameters, if necessary
                         if (model_name(i) == 'vp') then
 
-                            ! For vp
-                            ! Compute adjoint-state field
                             call adjoint_iso( &
                                 vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                 [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
                                 ttp_residual, lam)
 
                             if (yn_precond) then
-
-                                ! Compute preconditioner
                                 call adjoint_iso( &
                                     vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
                                     -ones_like(ttp_residual), energy)
                                 energy = -energy
-
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
-
                             else
-
                                 lam = -lam/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
-
                             end if
 
                             if (uniform_processing) then
@@ -337,28 +387,20 @@ contains
 
                         else if (model_name(i) == 'vs') then
 
-                            ! For vs
-                            ! Compute adjoint-state field
                             call adjoint_iso( &
                                 vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                 [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, &
                                 tts_residual, lam)
 
                             if (yn_precond) then
-
-                                ! Compute preconditioner
                                 call adjoint_iso( &
                                     vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, &
                                     -ones_like(tts_residual), energy)
                                 energy = -energy
-
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
-
                             else
-
                                 lam = -lam/vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
-
                             end if
 
                             if (uniform_processing) then
@@ -367,10 +409,7 @@ contains
                                 call process_model_single_shot(ishot, model_grad(i)%array, lam, 'grad_'//model_name(i))
                             end if
 
-                            ! Update source parameters
                         else if (model_name(i) == 'sx') then
-                            ! grad_sx = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂x, is a scalar value at each virtual receiver
-
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
                             do j = 1, gmtr(ishot)%nr
                                 irx = nint((sx(j, 1, 1) - shot_xbeg)/dx) + 1
@@ -384,8 +423,6 @@ contains
                             !$omp end parallel do
 
                         else if (model_name(i) == 'sy') then
-                            ! grad_sy = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂y, is a scalar value at each virtual receiver
-
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
                             do j = 1, gmtr(ishot)%nr
                                 irx = nint((sx(j, 1, 1) - shot_xbeg)/dx) + 1
@@ -399,8 +436,6 @@ contains
                             !$omp end parallel do
 
                         else if (model_name(i) == 'sz') then
-                            ! grad_sz = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂z, is a scalar value at each virtual receiver
-
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
                             do j = 1, gmtr(ishot)%nr
                                 irx = nint((sx(j, 1, 1) - shot_xbeg)/dx) + 1
@@ -414,12 +449,10 @@ contains
                             !$omp end parallel do
 
                         else if (model_name(i) == 'st0') then
-                            ! grad_st0 = (t_syn - (t_obs - t_0))*δ(x - x_vr)
-
                             !$omp parallel do private(j)
                             do j = 1, gmtr(ishot)%nr
-                                model_grad(i)%array(j, 1, 1) = model_grad(i)%array(j, 1, 1) + ttp_residual(j, 1) &
-                                    + tts_residual(j, 1)
+                                model_grad(i)%array(j, 1, 1) = model_grad(i)%array(j, 1, 1) + &
+                                    ttp_residual(j, 1) + tts_residual(j, 1)
                             end do
                             !$omp end parallel do
 
@@ -436,13 +469,27 @@ contains
 
         call mpibarrier
 
-        ! collect misfit
+        ! ═══════════════════════════════════════════════════════════════
+        ! COLLECT AND FINALIZE BASELINE MISFIT
+        ! This misfit corresponds EXACTLY to synthetic in dir_synthetic(iter)
+        ! ═══════════════════════════════════════════════════════════════
+        
         call allreduce_array(step_misfit)
         if (sum(data_misfit) == 0) then
             data_misfit(0) = sum(step_misfit)
             shot_misfit(:, 0) = step_misfit
         end if
         data_misfit(iter) = sum(step_misfit)
+        
+        if (rankid == 0) then
+            call warn(' ')
+            call warn(date_time_compact()//' ═══════════════════════════════════════════════════')
+            call warn(date_time_compact()//' ' // trim(label) // ' MISFIT (Iteration ' // num2str(iter) // '): ' // num2str(data_misfit(iter), '(es18.10)'))
+            call warn(date_time_compact()//' Corresponds to synthetic in: ' // tidy(dir_synthetic))
+            call warn(date_time_compact()//' ═══════════════════════════════════════════════════')
+
+            call warn(' ')
+        end if
 
         if (yn_misfit_only) then
             return
@@ -461,8 +508,9 @@ contains
     !
     !> Compute gradients shot by shot for TLOC-DD
     !
-    module subroutine compute_gradient_shots_tloc_dd
+    module subroutine compute_gradient_shots_tloc_dd(phase_type)
 
+        integer, intent(in), optional :: phase_type
         real, allocatable, dimension(:, :, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
         real, allocatable, dimension(:, :) :: tts_syn, tts_obs, tts_residual
@@ -471,15 +519,47 @@ contains
         real :: dxt, dyt, dzt
         real, allocatable, dimension(:, :, :) :: vp, vs, sx, sy, sz, st0
         character(len=1024) :: dir_field
+        character(len=32) :: label
         real, allocatable, dimension(:, :) :: tpsyn_all, tssyn_all, tpobs_all, tsobs_all
+        integer :: ptype
+        logical :: is_baseline, is_final
 
-        ! temporary directory
+        ! Get phase type (default to baseline = 0)
+        ptype = 0
+        if (present(phase_type)) ptype = phase_type
+
+        ! Set label based on phase type
+        select case (ptype)
+            case (0)
+                label = 'Baseline'
+            case (1)
+                label = 'Trial'
+            case (2)
+                label = 'Final'
+            case default
+                label = 'Baseline'
+        end select
+
+        is_baseline = (ptype == 0)
+        is_final = (ptype == 2)
+
+        if (rankid == 0) then
+            call warn(date_time_compact()//' Phase: '//trim(label)//' (type='//num2str(ptype)//')')
+        end if
+
+        ! Force-reset for Baseline/Final; preserve explicit trial dirs
+        if (is_baseline .or. is_final) then
+            dir_synthetic = dir_iter_synthetic(iter)
+        else
+            if (len_trim(dir_synthetic) == 0) dir_synthetic = dir_iter_synthetic(iter)
+        end if
+
         dir_scratch = tidy(dir_working)//'/scratch'
-        dir_synthetic = dir_iter_synthetic(iter)
         dir_field = dir_iter_record(iter)
         if (rankid == 0) then
             call make_directory(dir_synthetic)
             call make_directory(dir_scratch)
+            call warn(date_time_compact()//' [DirCheck] Iter=' // num2str(iter) // ' → ' // trim(dir_synthetic))
         end if
         call mpibarrier
 
@@ -581,7 +661,6 @@ contains
 
             ! Set adaptive range
             call set_adaptive_model_range(gmtr(ishot))
-
             select case (which_medium)
 
                 case ('acoustic-iso')
@@ -623,8 +702,7 @@ contains
 
             end select
 
-            call warn(date_time_compact()//' Shot '//num2str(gmtr(ishot)%id) &
-                //' traveltime computation is done. ')
+            call warn(date_time_compact()//' Shot ' // trim(num2str(gmtr(ishot)%id)) // ' ' // trim(label) // ' traveltime computation is done. ')
 
             if (sum(data_misfit) == 0) then
                 ! Copy initial iteration synthetic data to dir_working/iteration_0

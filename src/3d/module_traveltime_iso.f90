@@ -1128,7 +1128,7 @@ contains
         ! Increase the width of the multiplicative field around the source
         ! in the initialization seems to significantly improve the resulting accuracy,
         ! especially when the source point is not on an integer grid point
-        sw = 3
+        sw = 0
         !$omp parallel do private(i, isx, isy, isz, itx, ity, itz)
         do i = 1, geom%ns
             if (source_inside(i)) then
@@ -1263,7 +1263,7 @@ contains
         dz = d(3)
         ox = o(1)
         oy = o(2)
-        oz = o(2)
+        oz = o(3)
 
         tt = permute(t, 321)
         vp = permute(v, 321)
