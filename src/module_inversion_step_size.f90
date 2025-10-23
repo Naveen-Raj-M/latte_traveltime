@@ -479,7 +479,7 @@ contains
 
             ! For double-difference without st0
             file_recorded = dir_iter_record(iter)//'/t'//tidy(component_name)//'_all.bin'
-            file_synthetic_prev = dir_iter_synthetic(iter - 1)//'/t'//tidy(component_name)//'_all.bin'
+            file_synthetic_prev = dir_iter_synthetic(iter)//'/t'//tidy(component_name)//'_all.bin'
             
             ! Read from trial directory
             tsyn_trial_all = read_trial_synthetic(trial_num, -1, component_name)
@@ -514,7 +514,7 @@ contains
             ! Standard case
             file_recorded = dir_iter_record(iter)//'/shot_'//num2str(gmtr(srcindex)%id) &
                 //'_traveltime_'//tidy(component_name)//'.bin'
-            file_synthetic_prev = dir_iter_synthetic(iter - 1)//'/shot_' &
+            file_synthetic_prev = dir_iter_synthetic(iter)//'/shot_' &
                 //num2str(gmtr(srcindex)%id)//'_traveltime_'//tidy(component_name)//'.bin'
 
             ! Read data
