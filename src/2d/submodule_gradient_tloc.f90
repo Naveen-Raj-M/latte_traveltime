@@ -26,9 +26,9 @@ contains
     !
     !> Compute gradients shot by shot for TLOC-AD
     !
-    module subroutine compute_gradient_shots_tloc(phase_label)
+    module subroutine compute_gradient_shots_tloc(phase_type)
 
-        character(len=*), intent(in), optional :: phase_label
+        integer, intent(in), optional :: phase_type
 
         real, allocatable, dimension(:, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
@@ -420,9 +420,9 @@ contains
     !
     !> Compute gradients shot by shot for TLOC-DD
     !
-    module subroutine compute_gradient_shots_tloc_dd(phase_label)
+    module subroutine compute_gradient_shots_tloc_dd(phase_type)
 
-        character(len=*), intent(in), optional :: phase_label
+        integer, intent(in), optional :: phase_type
 
         real, allocatable, dimension(:, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
