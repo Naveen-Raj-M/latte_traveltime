@@ -74,7 +74,7 @@ exec4 = $(bindir)/x_tloc2
 all: makedir $(exec1) $(exec2) $(exec3) $(exec4)
 
 # options
-flitdir = $(HOME)/src/flit
+flitdir = $(HOME)/flit
 
 include $(flitdir)/src/Makefile.in
 inc = $(base_inc) -I$(flitdir)/lib

@@ -106,7 +106,6 @@ module parameters
     real, allocatable, dimension(:) :: data_misfit
     real, allocatable, dimension(:, :) :: shot_misfit
     real, allocatable, dimension(:) :: misfit_weight
-    real :: jumpout_factor = 1.0
 
     ! maximum and minimum offset
     real :: offset_min = 0.0d0
@@ -502,7 +501,7 @@ contains
                         valmax = oz + (nz - 1)*dz
                     case ('st0')
                         valmin = 0.0
-                        valmax = 1.0e6
+                        valmax = 2.0e9
                 end select
                 call readpar_float(file_parameter, 'min_'//tidy(model_name(i)), model_min(i), valmin)
                 call readpar_float(file_parameter, 'max_'//tidy(model_name(i)), model_max(i), valmax)
@@ -599,6 +598,9 @@ contains
 
             if (l == 0) then
                 gmtr(i)%ns = 0
+                if (rankid == 0) then
+                    call warn(date_time_compact()//' Warning: Shot '//num2str(i)//' (ID: '//num2str(gmtr(i)%id)//') removed - no valid sources')
+                end if
             end if
 
             ! Check receiver
@@ -632,6 +634,9 @@ contains
             ! check if any receiver in the model
             if (l == 0) then
                 gmtr(i)%nr = 0
+                if (rankid == 0) then
+                    call warn(date_time_compact()//' Warning: Shot '//num2str(i)//' (ID: '//num2str(gmtr(i)%id)//') removed - no valid receivers')
+                end if
             end if
 
         end do

@@ -259,6 +259,13 @@ contains
         real, allocatable, dimension(:, :, :) :: t_all
         integer :: nr_max
         integer, allocatable, dimension(:) :: valid_p, valid_s
+        integer :: total_matches
+
+        ! Buffered mapping data to write at the end (safer than writing in loops)
+        integer, allocatable, dimension(:, :) :: mapping_buffer_int
+        real, allocatable, dimension(:, :) :: mapping_buffer_real
+        integer :: mapping_count, mapping_capacity
+        integer :: funit, k
 
         ! The number of sources might be >> the number of stations/receivers.
         ! In such a case, using reciprocity theorem, we exchange the source and receivers
@@ -267,6 +274,10 @@ contains
         ! Also, for source location, because at a source location, a singularity exists,
         ! the sources and stations must be exchanged regardless of # of sources and receivers.
         if (yn_exchange_sr .or. which_program == 'tloc') then
+
+            ! Initialize counters
+            total_matches = 0
+            mapping_count = 0
 
             if (rankid == 0) then
                 call warn('')
@@ -288,6 +299,14 @@ contains
             end do
             rxyz = unique(rxyz, cols=[1, 2, 3])
             nr = size(rxyz, 1)
+
+            ! Allocate buffers to collect mapping data (write at end for safety)
+            ! Each mapping entry: virtual_shot_id, virtual_receiver_id, original_shot_id, original_receiver_id
+            mapping_capacity = nr * ns
+            if (rankid == 0) then
+                allocate(mapping_buffer_int(mapping_capacity, 4))
+                allocate(mapping_buffer_real(mapping_capacity, 2))
+            end if
 
             allocate (ttp_real(1:ns))
             allocate (tts_real(1:ns))
@@ -311,12 +330,11 @@ contains
             !            end if
 
             ! Every process reads some files, and share
-            !$omp parallel do private(i)
+            ! Note: Cannot use OpenMP here because zeros() allocates memory, causing heap corruption
             do i = 1, ns
                 ttp_real(i)%array = zeros(gmtr(i)%nr, 1)
                 tts_real(i)%array = zeros(gmtr(i)%nr, 1)
             end do
-            !$omp end parallel do
 
             if (which_program /= 'eikonal') then
 
@@ -325,7 +343,7 @@ contains
 
                 call alloc_array(shot_in_rank, [0, nrank - 1, 1, 2])
                 call cut(1, ns, nrank, shot_in_rank)
-                !$omp parallel do private(i)
+                ! Note: load() function may allocate memory, avoid OpenMP to prevent heap corruption
                 do i = shot_in_rank(rankid, 1), shot_in_rank(rankid, 2)
                     select case (which_medium)
                         case ('acoustic-iso', 'acoustic-tti')
@@ -335,11 +353,10 @@ contains
                             t_all(1:gmtr(i)%nr, i:i, 2) = load(tidy(dir_record)//'/shot_'//num2str(gmtr(i)%id)//'_traveltime_s.bin', gmtr(i)%nr, 1)
                     end select
                 end do
-                !$omp end parallel do
 
                 call allreduce_array(t_all)
 
-                !$omp parallel do private(i)
+                ! Note: Array assignments may trigger reallocation, avoid OpenMP to prevent heap corruption
                 do i = 1, ns
                     select case (which_medium)
                         case ('acoustic-iso', 'acoustic-tti')
@@ -349,7 +366,6 @@ contains
                             tts_real(i)%array = t_all(1:gmtr(i)%nr, i:i, 2)
                     end select
                 end do
-                !$omp end parallel do
 
             end if
             call mpibarrier
@@ -421,6 +437,19 @@ contains
                                     ttp(i)%array(j, 1) = ttp_real(j)%array(l, 1)
                                     gmtr(i)%recr(j)%weight = gmtr_real(j)%recr(l)%weight
                                     gmtr(i)%recr(j)%aoff = gmtr_real(j)%recr(l)%aoff
+
+                                    ! Buffer mapping information for writing later (safer than writing in nested loops)
+                                    if (rankid == 0) then
+                                        mapping_count = mapping_count + 1
+                                        mapping_buffer_int(mapping_count, 1) = i
+                                        mapping_buffer_int(mapping_count, 2) = j - 1
+                                        mapping_buffer_int(mapping_count, 3) = gmtr_real(j)%id
+                                        mapping_buffer_int(mapping_count, 4) = l - 1
+                                        mapping_buffer_real(mapping_count, 1) = ttp_real(j)%array(l, 1)
+                                        mapping_buffer_real(mapping_count, 2) = 0.0
+                                    end if
+
+                                    total_matches = total_matches + 1
                                     cycle
                                 end if
                             end do
@@ -436,6 +465,19 @@ contains
                                     tts(i)%array(j, 1) = tts_real(j)%array(l, 1)
                                     gmtr(i)%recr(j)%weight = gmtr_real(j)%recr(l)%weight
                                     gmtr(i)%recr(j)%aoff = gmtr_real(j)%recr(l)%aoff
+
+                                    ! Buffer mapping information for writing later (safer than writing in nested loops)
+                                    if (rankid == 0) then
+                                        mapping_count = mapping_count + 1
+                                        mapping_buffer_int(mapping_count, 1) = i
+                                        mapping_buffer_int(mapping_count, 2) = j - 1
+                                        mapping_buffer_int(mapping_count, 3) = gmtr_real(j)%id
+                                        mapping_buffer_int(mapping_count, 4) = l - 1
+                                        mapping_buffer_real(mapping_count, 1) = ttp_real(j)%array(l, 1)
+                                        mapping_buffer_real(mapping_count, 2) = tts_real(j)%array(l, 1)
+                                    end if
+
+                                    total_matches = total_matches + 1
                                     cycle
                                 end if
                             end do
@@ -461,6 +503,57 @@ contains
                 end if
 
             end do
+
+            ! Write all buffered data to files (rank 0 only, all at once for safety and performance)
+            if (rankid == 0) then
+                ! Write geometry file (virtual source positions)
+                open(newunit=funit, file=tidy(dir_working)//'/exchange_geometry.txt', status='replace')
+                write(funit, '(A)') '# Exchange Geometry File'
+                write(funit, '(A)') '# Virtual Sources (Unique Receiver Positions)'
+                write(funit, '(A)') '# Format: virtual_shot_id x_coord y_coord z_coord'
+                do k = 1, nr
+                    write(funit, '(I0,1X,F12.3,1X,F12.3,1X,F12.3)') k, rxyz(k, 1), rxyz(k, 2), rxyz(k, 3)
+                end do
+                close(funit)
+
+                ! Write shot mapping file
+                open(newunit=funit, file=tidy(dir_working)//'/shot_mapping.txt', status='replace')
+                write(funit, '(A)') '# Shot Index Mapping File'
+                write(funit, '(A)') '# Maps virtual receiver indices to original shot IDs'
+                write(funit, '(A)') '# Format: virtual_receiver_index original_shot_id'
+                do k = 1, size(gmtr_real)
+                    write(funit, '(I0,1X,I0)') k-1, gmtr_real(k)%id
+                end do
+                close(funit)
+
+                ! Write exchange mapping file with all buffered data
+                open(newunit=funit, file=tidy(dir_working)//'/exchange_mapping.txt', status='replace')
+                write(funit, '(A)') '# Exchange Mapping File'
+                write(funit, '(A)') '# Format: virtual_shot_id virtual_receiver_id original_shot_id original_receiver_id travel_time_p travel_time_s'
+                write(funit, '(A)') '# This file maps every virtual shot-receiver pair to its original counterpart'
+                do k = 1, mapping_count
+                    write(funit, '(I0,1X,I0,1X,I0,1X,I0,1X,F12.6,1X,F12.6)') &
+                        mapping_buffer_int(k, 1), mapping_buffer_int(k, 2), &
+                        mapping_buffer_int(k, 3), mapping_buffer_int(k, 4), &
+                        mapping_buffer_real(k, 1), mapping_buffer_real(k, 2)
+                end do
+                write(funit, '(A)') '# Exchange Summary:'
+                write(funit, '(A,I0)') '# Original shots: ', size(gmtr_real)
+                write(funit, '(A,I0)') '# Virtual sources: ', nr
+                write(funit, '(A,I0)') '# Virtual receivers per source: ', size(gmtr_real)
+                write(funit, '(A,I0)') '# Total reciprocal matches: ', mapping_count
+                write(funit, '(A,I0)') '# Total possible pairs: ', nr * size(gmtr_real)
+                write(funit, '(A,F8.3)') '# Match rate (%): ', real(mapping_count) / real(nr * size(gmtr_real)) * 100.0
+                close(funit)
+
+                ! Deallocate buffers
+                deallocate(mapping_buffer_int, mapping_buffer_real)
+
+                call warn(date_time_compact()//' Exchange mapping files created:')
+                call warn('  - exchange_mapping.txt (detailed shot-receiver mappings)')
+                call warn('  - exchange_geometry.txt (virtual source positions)')
+                call warn('  - shot_mapping.txt (virtual receiver index to shot ID mapping)')
+            end if
 
             call mpibarrier
 

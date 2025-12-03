@@ -29,25 +29,25 @@ module inversion_gradient
 contains
 
     !
-    !> Compute gradient by adjoint-state method
+    !> Compute gradient by the adjoint-state method
     !
     subroutine compute_gradient
 
-        ! Initialization
+        ! initialization
         call zero_gradient
 
-        ! Compute gradients
+        ! compute gradients for fwi
         yn_misfit_only = .false.
         call compute_gradient_shots
         call mpibarrier
 
-        ! Process and regularize gradients
+        ! post-processing and output gradients
         call process_gradient
         call regularize_gradient
         call output_gradient
         call mpibarrier
 
-        ! Print progress
+        ! print progress
         if (rankid == 0) then
             call warn(date_time_compact()//' >>>>>>>>>> Gradient computation completed. ')
         end if
