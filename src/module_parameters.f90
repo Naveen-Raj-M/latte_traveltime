@@ -106,6 +106,7 @@ module parameters
     real, allocatable, dimension(:) :: data_misfit
     real, allocatable, dimension(:, :) :: shot_misfit
     real, allocatable, dimension(:) :: misfit_weight
+    real :: jumpout_factor = 1.0
 
     ! maximum and minimum offset
     real :: offset_min = 0.0d0
