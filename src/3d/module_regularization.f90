@@ -327,7 +327,8 @@ contains
     !
     subroutine source_regularization
 
-        real, allocatable, dimension(:, :, :) :: sx, sy, sz, st0
+        real, allocatable, dimension(:, :, :) :: sx, sy, sz
+        double precision, allocatable, dimension(:, :, :) :: st0
         real, allocatable, dimension(:, :, :) :: sxr, syr, szr
         integer :: i, ic
         type(hdbscan_param) :: p

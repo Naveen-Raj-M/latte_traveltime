@@ -224,7 +224,7 @@ module parameters
 
     type source
         real :: x, y, z
-        real :: t0 = 0.0
+        double precision :: t0 = 0.0d0
         real :: amp = 1.0
     end type source
 
@@ -232,7 +232,7 @@ module parameters
         real :: x, y, z
         real :: aoff
         real :: weight = 1.0
-        real :: t0 = 0.0
+        double precision :: t0 = 0.0d0
     end type receiver
 
     type source_receiver_geometry

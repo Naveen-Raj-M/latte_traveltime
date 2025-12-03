@@ -34,7 +34,8 @@ contains
         real, allocatable, dimension(:, :) :: lam, energy
         integer :: i, j, irx, irz
         real :: dxt, dzt
-        real, allocatable, dimension(:, :) :: vp, vs, sx, sz, st0
+        real, allocatable, dimension(:, :) :: vp, vs, sx, sz
+        double precision, allocatable, dimension(:, :) :: st0
         character(len=1024) :: dir_field
 
         ! temporary directory
@@ -423,7 +424,8 @@ contains
         real, allocatable, dimension(:, :) :: lam, energy
         integer :: i, j, irx, irz
         real :: dxt, dzt
-        real, allocatable, dimension(:, :) :: vp, vs, sx, sz, st0
+        real, allocatable, dimension(:, :) :: vp, vs, sx, sz
+        double precision, allocatable, dimension(:, :) :: st0
         character(len=1024) :: dir_field
         real, allocatable, dimension(:, :) :: tpsyn_all, tssyn_all, tpobs_all, tsobs_all
 
