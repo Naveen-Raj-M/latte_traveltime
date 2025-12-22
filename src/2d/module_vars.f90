@@ -100,12 +100,7 @@ contains
                 ! if read in or assign const value
                 if (present(file_w) .and. file_w /= '') then
 
-                    ! Special handling for st0: read as double precision, then convert to real
-                    if (name == 'st0') then
-                        call input_array_st0_double(w, file_w)
-                    else
-                        call input_array(w, file_w)
-                    end if
+                    call input_array(w, file_w)
 
                 else
 
@@ -342,35 +337,6 @@ contains
         end if
 
     end subroutine init_reg
-
-    !
-    !> Read st0 (origin time) from double precision binary file and convert to real
-    !
-    subroutine input_array_st0_double(w, filename)
-
-        real, allocatable, dimension(:, :), intent(inout) :: w
-        character(len=*), intent(in) :: filename
-
-        double precision, allocatable, dimension(:, :) :: w_double
-        integer :: n1, n2
-
-        ! Get dimensions from the real array
-        n1 = size(w, 1)
-        n2 = size(w, 2)
-
-        ! Allocate double precision array with same dimensions
-        allocate(w_double(n1, n2))
-
-        ! Read from file as double precision
-        call input_array(w_double, filename)
-
-        ! Convert to real (single precision)
-        w = real(w_double)
-
-        ! Clean up
-        deallocate(w_double)
-
-    end subroutine input_array_st0_double
 
 end module vars
 

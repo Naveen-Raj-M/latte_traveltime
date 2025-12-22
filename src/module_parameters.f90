@@ -33,6 +33,7 @@ module parameters
     character(len=1024) :: dir_synthetic
     character(len=1024) :: dir_snapshot
     character(len=1024) :: dir_adjoint
+    character(len=1024) :: dir_gradient
 
     character(len=1204) :: file_geometry
 
@@ -43,6 +44,9 @@ module parameters
 
     ! snapshot times
     real, allocatable, dimension(:) :: snaps
+
+    ! traveltime gradient storage flag
+    logical :: yn_save_traveltime_gradients = .false.
 
     ! space taper when adaptive range required
     integer :: space_taperx = 10
@@ -106,7 +110,6 @@ module parameters
     real, allocatable, dimension(:) :: data_misfit
     real, allocatable, dimension(:, :) :: shot_misfit
     real, allocatable, dimension(:) :: misfit_weight
-    real :: jumpout_factor = 1.0
 
     ! maximum and minimum offset
     real :: offset_min = 0.0d0
@@ -225,7 +228,7 @@ module parameters
 
     type source
         real :: x, y, z
-        double precision :: t0 = 0.0d0
+        real :: t0 = 0.0
         real :: amp = 1.0
     end type source
 
@@ -233,7 +236,7 @@ module parameters
         real :: x, y, z
         real :: aoff
         real :: weight = 1.0
-        double precision :: t0 = 0.0d0
+        real :: t0 = 0.0
     end type receiver
 
     type source_receiver_geometry
@@ -383,6 +386,11 @@ contains
         call readpar_string(file_parameter, 'dir_snapshot', dir_snapshot, './snapshot')
         call readpar_string(file_parameter, 'dir_synthetic', dir_synthetic, './data_synthetic')
         call assert(dir_snapshot /= dir_synthetic, ' <read_parameters> Error: dir_snapshot and dir_synthetic cannot be the same. ')
+
+        call readpar_logical(file_parameter, 'yn_save_traveltime_gradients', yn_save_traveltime_gradients, .false.)
+        call readpar_string(file_parameter, 'dir_gradient', dir_gradient, './gradient')
+        call assert(dir_gradient /= dir_synthetic, ' <read_parameters> Error: dir_gradient and dir_synthetic cannot be the same. ')
+        call assert(dir_gradient /= dir_snapshot, ' <read_parameters> Error: dir_gradient and dir_snapshot cannot be the same. ')
 
         call readpar_logical(file_parameter, 'verbose', verbose, .false.)
         call readpar_float(file_parameter, 'sweep_stop_threshold', sweep_stop_threshold, 1.0e-4)

@@ -31,10 +31,16 @@ program main
 #ifdef dim2
     real, allocatable, dimension(:, :) :: ttp, tts, vp, vs, refl
     real, allocatable, dimension(:, :, :) :: ttp_all, tts_all
+    ! Gradient field storage
+    real, allocatable, dimension(:, :) :: pdx_p, pdz_p
+    real, allocatable, dimension(:, :) :: pdx_s, pdz_s
 #endif
 #ifdef dim3
     real, allocatable, dimension(:, :, :) :: ttp, tts, vp, vs, refl
     real, allocatable, dimension(:, :, :, :) :: ttp_all, tts_all
+    ! Gradient field storage
+    real, allocatable, dimension(:, :, :) :: pdx_p, pdy_p, pdz_p
+    real, allocatable, dimension(:, :, :) :: pdx_s, pdy_s, pdz_s
 #endif
     real, allocatable, dimension(:, :) :: ttprecr, ttsrecr
     integer :: i
@@ -107,6 +113,10 @@ program main
         call make_directory(dir_snapshot)
     end if
 
+    if (yn_save_traveltime_gradients .and. rankid == 0) then
+        call make_directory(dir_gradient)
+    end if
+
     call mpibarrier
 
     ! Traveltime computation source by source
@@ -130,9 +140,16 @@ program main
 
                 else
 
-                    call forward_iso( &
-                        vp(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
-                        [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), ttp, ttprecr)
+                    if (yn_save_traveltime_gradients) then
+                        call forward_iso( &
+                            vp(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
+                            [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), &
+                            ttp, ttprecr, pdx_p, pdz_p)
+                    else
+                        call forward_iso( &
+                            vp(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
+                            [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), ttp, ttprecr)
+                    end if
 
                 end if
 
@@ -147,9 +164,16 @@ program main
 
                 else
 
-                    call forward_iso( &
-                        vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
-                        [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, ttprecr)
+                    if (yn_save_traveltime_gradients) then
+                        call forward_iso( &
+                            vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
+                            [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), &
+                            ttp, ttprecr, pdx_p, pdy_p, pdz_p)
+                    else
+                        call forward_iso( &
+                            vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
+                            [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, ttprecr)
+                    end if
 
                 end if
 #endif
@@ -163,6 +187,16 @@ program main
                         call output_array(ttp, tidy(dir_snapshot)// &
                             '/shot_'//num2str(gmtr(ishot)%id)//'_traveltime_p.bin')
                     end if
+                end if
+                if (yn_save_traveltime_gradients) then
+                    call output_array(pdx_p, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_px.bin')
+#ifdef dim3
+                    call output_array(pdy_p, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_py.bin')
+#endif
+                    call output_array(pdz_p, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_pz.bin')
                 end if
 
             case ('elastic-iso')
@@ -189,12 +223,23 @@ program main
 
                 else
 
-                    call forward_iso( &
-                        vp(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
-                        [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), ttp, ttprecr)
-                    call forward_iso( &
-                        vs(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
-                        [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), tts, ttsrecr)
+                    if (yn_save_traveltime_gradients) then
+                        call forward_iso( &
+                            vp(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
+                            [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), &
+                            ttp, ttprecr, pdx_p, pdz_p)
+                        call forward_iso( &
+                            vs(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
+                            [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), &
+                            tts, ttsrecr, pdx_s, pdz_s)
+                    else
+                        call forward_iso( &
+                            vp(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
+                            [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), ttp, ttprecr)
+                        call forward_iso( &
+                            vs(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
+                            [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), tts, ttsrecr)
+                    end if
 
                 end if
 
@@ -221,12 +266,23 @@ program main
 
                 else
 
-                    call forward_iso( &
-                        vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
-                        [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, ttprecr)
-                    call forward_iso( &
-                        vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
-                        [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, ttsrecr)
+                    if (yn_save_traveltime_gradients) then
+                        call forward_iso( &
+                            vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
+                            [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), &
+                            ttp, ttprecr, pdx_p, pdy_p, pdz_p)
+                        call forward_iso( &
+                            vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
+                            [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), &
+                            tts, ttsrecr, pdx_s, pdy_s, pdz_s)
+                    else
+                        call forward_iso( &
+                            vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
+                            [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, ttprecr)
+                        call forward_iso( &
+                            vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
+                            [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, ttsrecr)
+                    end if
 
                 end if
 #endif
@@ -246,6 +302,24 @@ program main
                         call output_array(tts, tidy(dir_snapshot)// &
                             '/shot_'//num2str(gmtr(ishot)%id)//'_traveltime_s.bin')
                     end if
+                end if
+                if (yn_save_traveltime_gradients) then
+                    call output_array(pdx_p, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_px.bin')
+#ifdef dim3
+                    call output_array(pdy_p, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_py.bin')
+#endif
+                    call output_array(pdz_p, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_pz.bin')
+                    call output_array(pdx_s, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_sx.bin')
+#ifdef dim3
+                    call output_array(pdy_s, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_sy.bin')
+#endif
+                    call output_array(pdz_s, tidy(dir_gradient)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_sz.bin')
                 end if
 
         end select

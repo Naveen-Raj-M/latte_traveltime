@@ -856,13 +856,16 @@ contains
     !
     !> Fast sweeping factorized eikonal solver
     !
-    subroutine forward_iso(v, d, o, geom, t, trec)
+    subroutine forward_iso(v, d, o, geom, t, trec, pdx, pdy, pdz)
 
         real, dimension(:, :, :), intent(in) :: v
         real, dimension(1:3), intent(in) :: d, o
         type(source_receiver_geometry), intent(in) :: geom
         real, allocatable, dimension(:, :, :), intent(out) :: t
         real, allocatable, dimension(:, :), intent(out) :: trec
+        real, allocatable, dimension(:, :, :), intent(out), optional :: pdx
+        real, allocatable, dimension(:, :, :), intent(out), optional :: pdy
+        real, allocatable, dimension(:, :, :), intent(out), optional :: pdz
 
         double precision, allocatable, dimension(:, :, :) :: tt, tt_prev, vp
         double precision :: dx, dy, dz, ox, oy, oz
@@ -1080,6 +1083,17 @@ contains
             end if
         end do
         !$omp end parallel do
+
+        ! Output gradient fields if requested
+        if (present(pdx)) then
+            pdx = permute(pdxt0, 321)
+        end if
+        if (present(pdy)) then
+            pdy = permute(pdyt0, 321)
+        end if
+        if (present(pdz)) then
+            pdz = permute(pdzt0, 321)
+        end if
 
         t = permute(tt, 321)
 
