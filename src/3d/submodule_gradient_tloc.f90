@@ -229,6 +229,12 @@ contains
                                     -ones_like(ttp_residual), energy)
                                 energy = -energy
 
+                                ! Accumulate energy into DWS if requested
+                                if (yn_output_dws) then
+                                    model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
+                                        model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + energy
+                                end if
+
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
 
                             else
@@ -322,6 +328,12 @@ contains
                                     -ones_like(ttp_residual), energy)
                                 energy = -energy
 
+                                ! Accumulate energy into DWS if requested
+                                if (yn_output_dws) then
+                                    model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
+                                        model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + energy
+                                end if
+
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
 
                             else
@@ -353,6 +365,12 @@ contains
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, &
                                     -ones_like(tts_residual), energy)
                                 energy = -energy
+
+                                ! Accumulate energy into DWS if requested
+                                if (yn_output_dws) then
+                                    model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
+                                        model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + energy
+                                end if
 
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
 
@@ -454,6 +472,13 @@ contains
         do i = 1, nmodel
             call allreduce_array(model_grad(i)%array)
         end do
+
+        ! Reduce DWS arrays across MPI ranks
+        if (yn_output_dws .and. yn_precond) then
+            do i = 1, nmodel
+                call allreduce_array(model_dws(i)%array)
+            end do
+        end if
 
         call mpibarrier
 
@@ -742,6 +767,12 @@ contains
                                     -ones_like(ttp_residual), energy)
                                 energy = -energy
 
+                                ! Accumulate energy into DWS if requested
+                                if (yn_output_dws) then
+                                    model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
+                                        model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + energy
+                                end if
+
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
 
                             else
@@ -838,6 +869,12 @@ contains
                                     -ones_like(ttp_residual), energy)
                                 energy = -energy
 
+                                ! Accumulate energy into DWS if requested
+                                if (yn_output_dws) then
+                                    model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
+                                        model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + energy
+                                end if
+
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
 
                             else
@@ -869,6 +906,12 @@ contains
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, &
                                     -ones_like(tts_residual), energy)
                                 energy = -energy
+
+                                ! Accumulate energy into DWS if requested
+                                if (yn_output_dws) then
+                                    model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
+                                        model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + energy
+                                end if
 
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
 
@@ -969,6 +1012,13 @@ contains
         do i = 1, nmodel
             call allreduce_array(model_grad(i)%array)
         end do
+
+        ! Reduce DWS arrays across MPI ranks
+        if (yn_output_dws .and. yn_precond) then
+            do i = 1, nmodel
+                call allreduce_array(model_dws(i)%array)
+            end do
+        end if
 
         call mpibarrier
 

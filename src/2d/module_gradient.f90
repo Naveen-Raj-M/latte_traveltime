@@ -48,6 +48,7 @@ module gradient
     public :: compute_gradient_shots
     public :: process_gradient
     public :: output_gradient
+    public :: output_dws
     public :: compute_image_shots
 
 contains
@@ -70,6 +71,19 @@ contains
 
         if (yn_update_reflector) then
             refl_all = zeros(nz, nx, nrefl)
+        end if
+
+        ! Initialize DWS arrays
+        if (yn_output_dws .and. yn_precond) then
+            do i = 1, nmodel
+                select case (model_name(i))
+                    case default
+                        model_dws(i)%array = zeros(nz, nx)
+                    case ('sx', 'sz', 'st0')
+                        ! DWS not applicable for source parameters
+                        model_dws(i)%array = zeros(nr_virtual, 1)
+                end select
+            end do
         end if
 
     end subroutine zero_gradient
@@ -153,6 +167,33 @@ contains
         end if
 
     end subroutine output_gradient
+
+    !
+    !> Output DWS (Derivative Weighted Sum)
+    !
+    subroutine output_dws
+
+        integer :: i
+
+        if (yn_output_dws .and. yn_precond) then
+
+            if (rankid == 0) then
+
+                do i = 1, nmodel
+                    ! Only output DWS for velocity model parameters (not source parameters)
+                    if (.not. any(model_name(i) == ['sx', 'sz', 'st0'])) then
+                        call output_array(model_dws(i)%array, &
+                            dir_iter_model(iter)//'/dws_'//tidy(model_name(i))//'.bin')
+                    end if
+                end do
+
+                call warn(date_time_compact()//' >>>>>>>>>> DWS saved. ')
+
+            end if
+
+        end if
+
+    end subroutine output_dws
 
     !
     !> Specially process reflector image

@@ -188,6 +188,7 @@ module parameters
     real :: reflector_imaging_threshold = 1.0e-9
     logical :: yn_update_reflector
     logical :: yn_precond = .true.
+    logical :: yn_output_dws = .false.
 
     character(len=12) :: incident_wave = 'p'
     real :: precond_eps = 1.0e-4
@@ -376,6 +377,7 @@ contains
         call readpar_string(file_parameter, 'step_size_method', step_size_method, 'linear')
         call readpar_logical(file_parameter, 'yn_precond', yn_precond, .true.)
         call readpar_float(file_parameter, 'precond_eps', precond_eps, 1.0e-4)
+        call readpar_logical(file_parameter, 'yn_output_dws', yn_output_dws, .false.)
 
         call readpar_nfloat(file_parameter, 'snaps', snaps, [-1.0])
         call readpar_string(file_parameter, 'dir_snapshot', dir_snapshot, './snapshot')

@@ -27,6 +27,7 @@ module vars
     type(meta_array2_real), allocatable, dimension(:) :: model_aux
     type(meta_array2_real), allocatable, dimension(:) :: model_m, model_m_backup
     type(meta_array2_real), allocatable, dimension(:) :: model_grad, model_srch, model_reg
+    type(meta_array2_real), allocatable, dimension(:) :: model_dws
 
 contains
 
@@ -177,6 +178,9 @@ contains
                 allocate (model_grad(1:nmodel))
                 allocate (model_srch(1:nmodel))
                 allocate (model_m_backup(1:nmodel))
+                if (yn_output_dws .and. yn_precond) then
+                    allocate (model_dws(1:nmodel))
+                end if
 
                 do i = 1, nmodel
                     ! Models to be updated
@@ -190,6 +194,10 @@ contains
                     model_srch(i)%array = zeros_like(model_m(i)%array)
                     model_m_backup(i)%name = model_name(i)
                     model_m_backup(i)%array = zeros_like(model_m(i)%array)
+                    if (yn_output_dws .and. yn_precond) then
+                        model_dws(i)%name = model_name(i)
+                        model_dws(i)%array = zeros_like(model_m(i)%array)
+                    end if
 
                 end do
 

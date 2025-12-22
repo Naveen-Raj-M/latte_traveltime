@@ -45,6 +45,7 @@ contains
         call process_gradient
         call regularize_gradient
         call output_gradient
+        call output_dws
         call mpibarrier
 
         ! Print progress
