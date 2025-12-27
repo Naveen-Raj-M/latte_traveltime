@@ -43,7 +43,7 @@ program main
     real, allocatable, dimension(:, :, :) :: pdx_s, pdy_s, pdz_s
 #endif
     real, allocatable, dimension(:, :) :: ttprecr, ttsrecr
-    integer :: i
+    integer :: i, iz  ! TEMPORARY DEBUG: iz for depth loop
 
     which_program = 'eikonal'
 
@@ -97,7 +97,6 @@ program main
 
     ! TEMPORARY DEBUG: Print 1D velocity profile at x=1, y=1 (or x=1 for 2D)
     if (rankid == 0) then
-        integer :: iz
 #ifdef dim3
         write(*, '(a)') '--- TEMPORARY DEBUG: VP and VS distribution at x=1, y=1 ---'
         if (allocated(vp)) then
