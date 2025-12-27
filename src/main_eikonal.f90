@@ -95,6 +95,45 @@ program main
         end select
     end do
 
+    ! TEMPORARY DEBUG: Print 1D velocity profile at x=1, y=1 (or x=1 for 2D)
+    if (rankid == 0) then
+        integer :: iz
+#ifdef dim3
+        write(*, '(a)') '--- TEMPORARY DEBUG: VP and VS distribution at x=1, y=1 ---'
+        if (allocated(vp)) then
+            if (allocated(vs)) then
+                write(*, '(a)') 'Depth(m)         VP(m/s)         VS(m/s)'
+                do iz = 1, nz
+                    write(*, '(f10.2, f16.2, f16.2)') oz + (iz-1)*dz, vp(iz, 1, 1), vs(iz, 1, 1)
+                end do
+            else
+                write(*, '(a)') 'Depth(m)         VP(m/s)'
+                do iz = 1, nz
+                    write(*, '(f10.2, f16.2)') oz + (iz-1)*dz, vp(iz, 1, 1)
+                end do
+            end if
+        end if
+#endif
+#ifdef dim2
+        write(*, '(a)') '--- TEMPORARY DEBUG: VP and VS distribution at x=1 ---'
+        if (allocated(vp)) then
+            if (allocated(vs)) then
+                write(*, '(a)') 'Depth(m)         VP(m/s)         VS(m/s)'
+                do iz = 1, nz
+                    write(*, '(f10.2, f16.2, f16.2)') oz + (iz-1)*dz, vp(iz, 1), vs(iz, 1)
+                end do
+            else
+                write(*, '(a)') 'Depth(m)         VP(m/s)'
+                do iz = 1, nz
+                    write(*, '(f10.2, f16.2)') oz + (iz-1)*dz, vp(iz, 1)
+                end do
+            end if
+        end if
+#endif
+        write(*, '(a)') '--- END TEMPORARY DEBUG ---'
+    end if
+    ! END TEMPORARY DEBUG
+
     ! Make directory
     call make_directory(dir_synthetic)
 
