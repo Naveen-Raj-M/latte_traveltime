@@ -230,11 +230,11 @@ contains
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
-                                    ! Clip extreme values for DWS (regions outside ray coverage)
+                                    ! DWS should be positive (sum of squared Frechet derivatives)
                                     ! Keep original energy unchanged for gradient preconditioning
                                     model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
                                         model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + &
-                                        merge(energy, 0.0, abs(energy) < 1.0e10)
+                                        abs(energy)
                                 end if
 
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
@@ -332,11 +332,11 @@ contains
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
-                                    ! Clip extreme values for DWS (regions outside ray coverage)
+                                    ! DWS should be positive (sum of squared Frechet derivatives)
                                     ! Keep original energy unchanged for gradient preconditioning
                                     model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
                                         model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + &
-                                        merge(energy, 0.0, abs(energy) < 1.0e10)
+                                        abs(energy)
                                 end if
 
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
@@ -373,11 +373,11 @@ contains
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
-                                    ! Clip extreme values for DWS (regions outside ray coverage)
+                                    ! DWS should be positive (sum of squared Frechet derivatives)
                                     ! Keep original energy unchanged for gradient preconditioning
                                     model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
                                         model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + &
-                                        merge(energy, 0.0, abs(energy) < 1.0e10)
+                                        abs(energy)
                                 end if
 
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
@@ -776,11 +776,11 @@ contains
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
-                                    ! Clip extreme values for DWS (regions outside ray coverage)
+                                    ! DWS should be positive (sum of squared Frechet derivatives)
                                     ! Keep original energy unchanged for gradient preconditioning
                                     model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
                                         model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + &
-                                        merge(energy, 0.0, abs(energy) < 1.0e10)
+                                        abs(energy)
                                 end if
 
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
@@ -881,11 +881,11 @@ contains
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
-                                    ! Clip extreme values for DWS (regions outside ray coverage)
+                                    ! DWS should be positive (sum of squared Frechet derivatives)
                                     ! Keep original energy unchanged for gradient preconditioning
                                     model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
                                         model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + &
-                                        merge(energy, 0.0, abs(energy) < 1.0e10)
+                                        abs(energy)
                                 end if
 
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
@@ -922,11 +922,11 @@ contains
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
-                                    ! Clip extreme values for DWS (regions outside ray coverage)
+                                    ! DWS should be positive (sum of squared Frechet derivatives)
                                     ! Keep original energy unchanged for gradient preconditioning
                                     model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = &
                                         model_dws(i)%array(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + &
-                                        merge(energy, 0.0, abs(energy) < 1.0e10)
+                                        abs(energy)
                                 end if
 
                                 lam = -lam/(energy + precond_eps*maxval(abs(energy)))
