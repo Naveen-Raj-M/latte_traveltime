@@ -39,6 +39,7 @@ module utility
     public :: point_in_domain
     public :: within_the_same_grid
     public :: get_point_value_inside
+    public :: write_gradient_metadata
 
 contains
 
@@ -785,6 +786,52 @@ contains
         end do
 
     end subroutine compute_shot_misfit
+
+    !
+    !> Write gradient field metadata for postprocessing
+    !> This writes the local grid parameters for each shot to enable
+    !> correct ray path visualization in Python postprocessing
+    !
+    subroutine write_gradient_metadata(shot_id, dir, ox, oy, oz, nx, ny, nz, dx, dy, dz)
+
+        integer, intent(in) :: shot_id
+        character(len=*), intent(in) :: dir
+        real, intent(in) :: ox, oy, oz
+        integer, intent(in) :: nx, ny, nz
+        real, intent(in) :: dx, dy, dz
+
+        character(len=1024) :: filename
+        integer :: funit
+
+        ! Construct metadata filename
+        filename = tidy(dir)//'/shot_'//num2str(shot_id)//'_gradient_metadata.txt'
+
+        ! Open file for writing using standard Fortran I/O
+        open(newunit=funit, file=filename, status='replace', action='write')
+
+        ! Write metadata in simple key=value format
+        write(funit, '(a)') '# LATTE Gradient Field Metadata'
+        write(funit, '(a,i0)') '# Shot ID: ', shot_id
+        write(funit, '(a)') '#'
+        write(funit, '(a)') '# Local grid parameters for this shot:'
+        write(funit, '(a)') '# - origin_x/y/z: Origin of the local grid in km'
+        write(funit, '(a)') '# - nx/ny/nz: Number of grid points in each dimension'
+        write(funit, '(a)') '# - dx/dy/dz: Grid spacing in km'
+        write(funit, '(a)') '#'
+        write(funit, '(a,es16.8)') 'origin_x = ', ox
+        write(funit, '(a,es16.8)') 'origin_y = ', oy
+        write(funit, '(a,es16.8)') 'origin_z = ', oz
+        write(funit, '(a,i0)') 'nx = ', nx
+        write(funit, '(a,i0)') 'ny = ', ny
+        write(funit, '(a,i0)') 'nz = ', nz
+        write(funit, '(a,es16.8)') 'dx = ', dx
+        write(funit, '(a,es16.8)') 'dy = ', dy
+        write(funit, '(a,es16.8)') 'dz = ', dz
+
+        ! Close file
+        close(funit)
+
+    end subroutine write_gradient_metadata
 
 
 #ifdef dim2

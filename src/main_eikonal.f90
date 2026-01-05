@@ -235,6 +235,16 @@ program main
 #endif
                     call output_array(pdz_p, tidy(dir_gradient)// &
                         '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_pz.bin')
+                    ! Write metadata for gradient field
+#ifdef dim3
+                    call write_gradient_metadata(gmtr(ishot)%id, dir_gradient, &
+                        shot_xbeg, shot_ybeg, shot_zbeg, &
+                        shot_nx, shot_ny, shot_nz, dx, dy, dz)
+#else
+                    call write_gradient_metadata(gmtr(ishot)%id, dir_gradient, &
+                        shot_xbeg, 0.0, shot_zbeg, &
+                        shot_nx, 1, shot_nz, dx, 1.0, dz)
+#endif
                 end if
 
             case ('elastic-iso')
@@ -358,6 +368,16 @@ program main
 #endif
                     call output_array(pdz_s, tidy(dir_gradient)// &
                         '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_sz.bin')
+                    ! Write metadata for gradient field
+#ifdef dim3
+                    call write_gradient_metadata(gmtr(ishot)%id, dir_gradient, &
+                        shot_xbeg, shot_ybeg, shot_zbeg, &
+                        shot_nx, shot_ny, shot_nz, dx, dy, dz)
+#else
+                    call write_gradient_metadata(gmtr(ishot)%id, dir_gradient, &
+                        shot_xbeg, 0.0, shot_zbeg, &
+                        shot_nx, 1, shot_nz, dx, 1.0, dz)
+#endif
                 end if
 
         end select
