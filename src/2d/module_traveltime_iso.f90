@@ -708,6 +708,40 @@ contains
             vp = 0
         end where
 
+        ! Compute gradients of final traveltime field using finite differences
+        ! Only compute if gradient output is requested
+        if (present(pdx) .or. present(pdz)) then
+            !$omp parallel do private(i, j)
+            do j = 1, nz
+                do i = 1, nx
+                    ! Gradient in x-direction using finite differences
+                    if (i == 1) then
+                        ! Forward difference at left boundary
+                        pdxt0(i, j) = (tt(i + 1, j) - tt(i, j))/dx
+                    else if (i == nx) then
+                        ! Backward difference at right boundary
+                        pdxt0(i, j) = (tt(i, j) - tt(i - 1, j))/dx
+                    else
+                        ! Centered difference in interior
+                        pdxt0(i, j) = (tt(i + 1, j) - tt(i - 1, j))/(2.0d0*dx)
+                    end if
+
+                    ! Gradient in z-direction using finite differences
+                    if (j == 1) then
+                        ! Forward difference at top boundary
+                        pdzt0(i, j) = (tt(i, j + 1) - tt(i, j))/dz
+                    else if (j == nz) then
+                        ! Backward difference at bottom boundary
+                        pdzt0(i, j) = (tt(i, j) - tt(i, j - 1))/dz
+                    else
+                        ! Centered difference in interior
+                        pdzt0(i, j) = (tt(i, j + 1) - tt(i, j - 1))/(2.0d0*dz)
+                    end if
+                end do
+            end do
+            !$omp end parallel do
+        end if
+
         ! Get the traveltime values at the receivers, if necessary
         trec = zeros(geom%nr, 1)
         !$omp parallel do private(i, irx, irz, l, vsource, dsx, dsz)

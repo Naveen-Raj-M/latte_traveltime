@@ -1046,6 +1046,54 @@ contains
             vp = 0
         end where
 
+        ! Compute gradients of final traveltime field using finite differences
+        ! Only compute if gradient output is requested
+        if (present(pdx) .or. present(pdy) .or. present(pdz)) then
+            !$omp parallel do private(i, j, k)
+            do k = 1, nz
+                do j = 1, ny
+                    do i = 1, nx
+                        ! Gradient in x-direction using finite differences
+                        if (i == 1) then
+                            ! Forward difference at left boundary
+                            pdxt0(i, j, k) = (tt(i + 1, j, k) - tt(i, j, k))/dx
+                        else if (i == nx) then
+                            ! Backward difference at right boundary
+                            pdxt0(i, j, k) = (tt(i, j, k) - tt(i - 1, j, k))/dx
+                        else
+                            ! Centered difference in interior
+                            pdxt0(i, j, k) = (tt(i + 1, j, k) - tt(i - 1, j, k))/(2.0d0*dx)
+                        end if
+
+                        ! Gradient in y-direction using finite differences
+                        if (j == 1) then
+                            ! Forward difference at front boundary
+                            pdyt0(i, j, k) = (tt(i, j + 1, k) - tt(i, j, k))/dy
+                        else if (j == ny) then
+                            ! Backward difference at back boundary
+                            pdyt0(i, j, k) = (tt(i, j, k) - tt(i, j - 1, k))/dy
+                        else
+                            ! Centered difference in interior
+                            pdyt0(i, j, k) = (tt(i, j + 1, k) - tt(i, j - 1, k))/(2.0d0*dy)
+                        end if
+
+                        ! Gradient in z-direction using finite differences
+                        if (k == 1) then
+                            ! Forward difference at top boundary
+                            pdzt0(i, j, k) = (tt(i, j, k + 1) - tt(i, j, k))/dz
+                        else if (k == nz) then
+                            ! Backward difference at bottom boundary
+                            pdzt0(i, j, k) = (tt(i, j, k) - tt(i, j, k - 1))/dz
+                        else
+                            ! Centered difference in interior
+                            pdzt0(i, j, k) = (tt(i, j, k + 1) - tt(i, j, k - 1))/(2.0d0*dz)
+                        end if
+                    end do
+                end do
+            end do
+            !$omp end parallel do
+        end if
+
         ! Get the traveltime values at the receivers, if necessary
         trec = zeros(geom%nr, 1)
         !$omp parallel do private(i, irx, iry, irz, l, vsource, dsx, dsy, dsz)
