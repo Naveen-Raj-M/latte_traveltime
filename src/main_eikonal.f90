@@ -25,6 +25,7 @@ program main
     use vars
     use traveltime_iso
     use traveltime_iso_reflection
+    use raypath
 
     implicit none
 
@@ -44,6 +45,13 @@ program main
 #endif
     real, allocatable, dimension(:, :) :: ttprecr, ttsrecr
     integer :: i, iz  ! TEMPORARY DEBUG: iz for depth loop
+
+    ! Ray path storage variables
+    integer, allocatable, dimension(:) :: raypath_npoints_p, raypath_npoints_s
+    real, allocatable, dimension(:, :) :: raypath_coords_p, raypath_coords_s
+    integer, allocatable, dimension(:) :: raypath_status_p, raypath_status_s
+    logical :: need_gradients_for_raypath  ! Flag to track if gradients needed only for ray paths
+    integer :: n_success_rays, n_total_rays
 
     which_program = 'eikonal'
 
@@ -70,6 +78,9 @@ program main
 
     ! Read parameters
     call read_parameters
+
+    ! Initialize ray path parameters
+    call initialize_raypath_params
 
     ! Set dimensions
     call set_regular_space
@@ -155,6 +166,15 @@ program main
         call make_directory(dir_gradient)
     end if
 
+    ! Create ray path directory if needed
+    if (raypath_save .and. rankid == 0) then
+        call make_directory(raypath_dir)
+        call warn(date_time_compact()//' Ray path output enabled. Directory: '//tidy(raypath_dir))
+        if (raypath_adaptive_step) call warn(date_time_compact()//'   - Adaptive step size: enabled')
+        if (raypath_hybrid_mode) call warn(date_time_compact()//'   - Hybrid mode: enabled')
+        if (raypath_momentum_mode) call warn(date_time_compact()//'   - Momentum mode: enabled')
+    end if
+
     call mpibarrier
 
     ! Traveltime computation source by source
@@ -168,6 +188,9 @@ program main
 
             case ('acoustic-iso')
 
+                ! Determine if gradients are needed (for saving or ray path tracing)
+                need_gradients_for_raypath = raypath_save .and. .not. yn_save_traveltime_gradients
+
 #ifdef dim2
                 if (allocated(refl)) then
 
@@ -178,7 +201,8 @@ program main
 
                 else
 
-                    if (yn_save_traveltime_gradients) then
+                    ! Compute gradients if saving them OR if needed for ray paths
+                    if (yn_save_traveltime_gradients .or. raypath_save) then
                         call forward_iso( &
                             vp(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
                             [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), &
@@ -202,7 +226,8 @@ program main
 
                 else
 
-                    if (yn_save_traveltime_gradients) then
+                    ! Compute gradients if saving them OR if needed for ray paths
+                    if (yn_save_traveltime_gradients .or. raypath_save) then
                         call forward_iso( &
                             vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                             [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), &
@@ -226,6 +251,38 @@ program main
                             '/shot_'//num2str(gmtr(ishot)%id)//'_traveltime_p.bin')
                     end if
                 end if
+
+                ! Trace and save ray paths for P-wave (acoustic)
+                if (raypath_save .and. .not. allocated(refl)) then
+#ifdef dim2
+                    call trace_shot_ray_paths(pdx_p, pdz_p, [dx, dz], &
+                        [shot_xbeg, shot_zbeg], gmtr(ishot), &
+                        raypath_npoints_p, raypath_coords_p, raypath_status_p)
+                    call write_ray_paths_binary(tidy(raypath_dir)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_raypath_p.bin', &
+                        raypath_npoints_p, raypath_coords_p)
+#endif
+#ifdef dim3
+                    call trace_shot_ray_paths(pdx_p, pdy_p, pdz_p, &
+                        [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), &
+                        raypath_npoints_p, raypath_coords_p, raypath_status_p)
+                    call write_ray_paths_binary(tidy(raypath_dir)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_raypath_p.bin', &
+                        raypath_npoints_p, raypath_coords_p)
+#endif
+                    ! Report ray path statistics
+                    n_total_rays = size(raypath_status_p)
+                    n_success_rays = count(raypath_status_p == RAYSTATUS_SUCCESS)
+                    if (verbose) then
+                        call warn(date_time_compact()//' Shot '//num2str(gmtr(ishot)%id)// &
+                            ' P-wave rays: '//num2str(n_success_rays)//'/'//num2str(n_total_rays)//' converged')
+                    end if
+                    ! Deallocate ray path arrays
+                    if (allocated(raypath_npoints_p)) deallocate(raypath_npoints_p)
+                    if (allocated(raypath_coords_p)) deallocate(raypath_coords_p)
+                    if (allocated(raypath_status_p)) deallocate(raypath_status_p)
+                end if
+
                 if (yn_save_traveltime_gradients) then
                     call output_array(pdx_p, tidy(dir_gradient)// &
                         '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_px.bin')
@@ -244,6 +301,15 @@ program main
                     call write_gradient_metadata(gmtr(ishot)%id, dir_gradient, &
                         shot_xbeg, 0.0, shot_zbeg, &
                         shot_nx, 1, shot_nz, dx, 1.0, dz)
+#endif
+                end if
+
+                ! Deallocate gradients if they were only computed for ray paths
+                if (need_gradients_for_raypath .and. .not. allocated(refl)) then
+                    if (allocated(pdx_p)) deallocate(pdx_p)
+                    if (allocated(pdz_p)) deallocate(pdz_p)
+#ifdef dim3
+                    if (allocated(pdy_p)) deallocate(pdy_p)
 #endif
                 end if
 
@@ -271,7 +337,8 @@ program main
 
                 else
 
-                    if (yn_save_traveltime_gradients) then
+                    ! Compute gradients if saving them OR if needed for ray paths
+                    if (yn_save_traveltime_gradients .or. raypath_save) then
                         call forward_iso( &
                             vp(shot_nzbeg:shot_nzend, shot_nxbeg:shot_nxend), &
                             [dx, dz], [shot_xbeg, shot_zbeg], gmtr(ishot), &
@@ -314,7 +381,8 @@ program main
 
                 else
 
-                    if (yn_save_traveltime_gradients) then
+                    ! Compute gradients if saving them OR if needed for ray paths
+                    if (yn_save_traveltime_gradients .or. raypath_save) then
                         call forward_iso( &
                             vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                             [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), &
@@ -351,6 +419,61 @@ program main
                             '/shot_'//num2str(gmtr(ishot)%id)//'_traveltime_s.bin')
                     end if
                 end if
+
+                ! Trace and save ray paths for P-wave and S-wave (elastic)
+                if (raypath_save .and. .not. allocated(refl)) then
+#ifdef dim2
+                    ! P-wave ray paths
+                    call trace_shot_ray_paths(pdx_p, pdz_p, [dx, dz], &
+                        [shot_xbeg, shot_zbeg], gmtr(ishot), &
+                        raypath_npoints_p, raypath_coords_p, raypath_status_p)
+                    call write_ray_paths_binary(tidy(raypath_dir)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_raypath_p.bin', &
+                        raypath_npoints_p, raypath_coords_p)
+                    ! S-wave ray paths
+                    call trace_shot_ray_paths(pdx_s, pdz_s, [dx, dz], &
+                        [shot_xbeg, shot_zbeg], gmtr(ishot), &
+                        raypath_npoints_s, raypath_coords_s, raypath_status_s)
+                    call write_ray_paths_binary(tidy(raypath_dir)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_raypath_s.bin', &
+                        raypath_npoints_s, raypath_coords_s)
+#endif
+#ifdef dim3
+                    ! P-wave ray paths
+                    call trace_shot_ray_paths(pdx_p, pdy_p, pdz_p, &
+                        [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), &
+                        raypath_npoints_p, raypath_coords_p, raypath_status_p)
+                    call write_ray_paths_binary(tidy(raypath_dir)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_raypath_p.bin', &
+                        raypath_npoints_p, raypath_coords_p)
+                    ! S-wave ray paths
+                    call trace_shot_ray_paths(pdx_s, pdy_s, pdz_s, &
+                        [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), &
+                        raypath_npoints_s, raypath_coords_s, raypath_status_s)
+                    call write_ray_paths_binary(tidy(raypath_dir)// &
+                        '/shot_'//num2str(gmtr(ishot)%id)//'_raypath_s.bin', &
+                        raypath_npoints_s, raypath_coords_s)
+#endif
+                    ! Report ray path statistics
+                    if (verbose) then
+                        n_total_rays = size(raypath_status_p)
+                        n_success_rays = count(raypath_status_p == RAYSTATUS_SUCCESS)
+                        call warn(date_time_compact()//' Shot '//num2str(gmtr(ishot)%id)// &
+                            ' P-wave rays: '//num2str(n_success_rays)//'/'//num2str(n_total_rays)//' converged')
+                        n_total_rays = size(raypath_status_s)
+                        n_success_rays = count(raypath_status_s == RAYSTATUS_SUCCESS)
+                        call warn(date_time_compact()//' Shot '//num2str(gmtr(ishot)%id)// &
+                            ' S-wave rays: '//num2str(n_success_rays)//'/'//num2str(n_total_rays)//' converged')
+                    end if
+                    ! Deallocate ray path arrays
+                    if (allocated(raypath_npoints_p)) deallocate(raypath_npoints_p)
+                    if (allocated(raypath_coords_p)) deallocate(raypath_coords_p)
+                    if (allocated(raypath_status_p)) deallocate(raypath_status_p)
+                    if (allocated(raypath_npoints_s)) deallocate(raypath_npoints_s)
+                    if (allocated(raypath_coords_s)) deallocate(raypath_coords_s)
+                    if (allocated(raypath_status_s)) deallocate(raypath_status_s)
+                end if
+
                 if (yn_save_traveltime_gradients) then
                     call output_array(pdx_p, tidy(dir_gradient)// &
                         '/shot_'//num2str(gmtr(ishot)%id)//'_gradient_px.bin')
@@ -377,6 +500,18 @@ program main
                     call write_gradient_metadata(gmtr(ishot)%id, dir_gradient, &
                         shot_xbeg, 0.0, shot_zbeg, &
                         shot_nx, 1, shot_nz, dx, 1.0, dz)
+#endif
+                end if
+
+                ! Deallocate gradients if they were only computed for ray paths
+                if (need_gradients_for_raypath .and. .not. allocated(refl)) then
+                    if (allocated(pdx_p)) deallocate(pdx_p)
+                    if (allocated(pdz_p)) deallocate(pdz_p)
+                    if (allocated(pdx_s)) deallocate(pdx_s)
+                    if (allocated(pdz_s)) deallocate(pdz_s)
+#ifdef dim3
+                    if (allocated(pdy_p)) deallocate(pdy_p)
+                    if (allocated(pdy_s)) deallocate(pdy_s)
 #endif
                 end if
 

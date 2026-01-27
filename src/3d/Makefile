@@ -27,7 +27,8 @@ common = \
 	module_vars.o \
 	module_utility.o \
 	module_traveltime_iso.o \
-	module_traveltime_iso_reflection.o
+	module_traveltime_iso_reflection.o \
+	module_raypath.o
 
 object1 = \
     $(common) \

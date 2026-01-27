@@ -392,6 +392,11 @@ contains
         call assert(dir_gradient /= dir_synthetic, ' <read_parameters> Error: dir_gradient and dir_synthetic cannot be the same. ')
         call assert(dir_gradient /= dir_snapshot, ' <read_parameters> Error: dir_gradient and dir_snapshot cannot be the same. ')
 
+        ! Ray path parameters are initialized via the raypath module
+        ! Parameters: raypath_save, raypath_dir, raypath_step_size, raypath_tolerance,
+        !             raypath_max_steps, raypath_interpolation, raypath_adaptive_step,
+        !             raypath_hybrid_mode, raypath_momentum_mode
+
         call readpar_logical(file_parameter, 'verbose', verbose, .false.)
         call readpar_float(file_parameter, 'sweep_stop_threshold', sweep_stop_threshold, 1.0e-4)
         call readpar_int(file_parameter, 'sweep_niter_max', sweep_niter_max, 10)
