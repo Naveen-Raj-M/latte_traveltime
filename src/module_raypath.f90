@@ -62,7 +62,7 @@ module raypath
 
     ! Constants for ray tracing
     real, parameter :: RAYPATH_MIN_STEP_FACTOR = 0.1
-    real, parameter :: RAYPATH_MAX_STEP_FACTOR = 2.0
+    real, parameter :: RAYPATH_MAX_STEP_FACTOR = 0.5  ! Changed from 2.0 to 0.5 to prevent large overshoots
 
     ! Ray path termination status codes (use RAYSTATUS_ prefix to avoid name collision)
     integer, parameter, public :: RAYSTATUS_SUCCESS = 0
@@ -273,14 +273,16 @@ contains
             end if
 
             ! Check for oscillation (not making progress)
-            if (dist_to_src >= prev_dist) then
+            ! Use a small tolerance to avoid counting tiny fluctuations as progress
+            if (dist_to_src >= prev_dist - tolerance * 0.01) then
                 oscillation_count = oscillation_count + 1
-                if (oscillation_count > 100) then
+                if (oscillation_count > 50) then  ! Reduced from 100 to 50 for faster detection
                     status = RAYSTATUS_OSCILLATING
                     exit
                 end if
             else
-                oscillation_count = 0
+                ! Decay counter slowly instead of resetting to prevent persistent oscillations
+                oscillation_count = max(0, oscillation_count - 1)
             end if
             prev_dist = dist_to_src
 
@@ -364,9 +366,10 @@ contains
         x_coord = (px - o(1)) / d(1)
         z_coord = (pz - o(2)) / d(2)
 
-        ! Check bounds
-        if (x_coord < -0.5 .or. x_coord > local_nx - 0.5 .or. &
-            z_coord < -0.5 .or. z_coord > local_nz - 0.5) then
+        ! Check physical domain bounds (similar to point_in_domain in module_utility.f90)
+        ! Position must be within [origin, origin + (n-1)*spacing]
+        if ((px - o(1)) < 0.0 .or. (px - o(1)) > (local_nx - 1) * d(1) .or. &
+            (pz - o(2)) < 0.0 .or. (pz - o(2)) > (local_nz - 1) * d(2)) then
             status = RAYSTATUS_OUT_OF_BOUNDS
             gx = 0.0
             gz = 0.0
@@ -644,14 +647,17 @@ contains
                 exit
             end if
 
-            if (dist_to_src >= prev_dist) then
+            ! Check for oscillation (not making progress)
+            ! Use a small tolerance to avoid counting tiny fluctuations as progress
+            if (dist_to_src >= prev_dist - tolerance * 0.01) then
                 oscillation_count = oscillation_count + 1
-                if (oscillation_count > 100) then
+                if (oscillation_count > 50) then  ! Reduced from 100 to 50 for faster detection
                     status = RAYSTATUS_OSCILLATING
                     exit
                 end if
             else
-                oscillation_count = 0
+                ! Decay counter slowly instead of resetting to prevent persistent oscillations
+                oscillation_count = max(0, oscillation_count - 1)
             end if
             prev_dist = dist_to_src
 
@@ -732,9 +738,11 @@ contains
         y_coord = (py - o(2)) / d(2)
         z_coord = (pz - o(3)) / d(3)
 
-        if (x_coord < -0.5 .or. x_coord > local_nx - 0.5 .or. &
-            y_coord < -0.5 .or. y_coord > local_ny - 0.5 .or. &
-            z_coord < -0.5 .or. z_coord > local_nz - 0.5) then
+        ! Check physical domain bounds (similar to point_in_domain in module_utility.f90)
+        ! Position must be within [origin, origin + (n-1)*spacing]
+        if ((px - o(1)) < 0.0 .or. (px - o(1)) > (local_nx - 1) * d(1) .or. &
+            (py - o(2)) < 0.0 .or. (py - o(2)) > (local_ny - 1) * d(2) .or. &
+            (pz - o(3)) < 0.0 .or. (pz - o(3)) > (local_nz - 1) * d(3)) then
             status = RAYSTATUS_OUT_OF_BOUNDS
             gx = 0.0
             gy = 0.0
