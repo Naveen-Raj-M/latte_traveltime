@@ -358,7 +358,15 @@ contains
         do i = 1, nr
             do j = 1, nrefl + 1
 
-                weight(i, j) = gmtr(srcindex)%recr(i)%weight*misfit_weight(j)
+                if (yn_separate_ps_weight) then
+                    if (component_name == 'p') then
+                        weight(i, j) = gmtr(srcindex)%recr(i)%weight_p*misfit_weight(j)
+                    else
+                        weight(i, j) = gmtr(srcindex)%recr(i)%weight_s*misfit_weight(j)
+                    end if
+                else
+                    weight(i, j) = gmtr(srcindex)%recr(i)%weight*misfit_weight(j)
+                end if
 
                 if (abs(r1(i, j)) > misfit_threshold .or. abs(r2(i, j)) > misfit_threshold) then
                     weight(i, j) = 0

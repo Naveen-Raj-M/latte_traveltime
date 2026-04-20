@@ -422,7 +422,9 @@ contains
 
                     ! Initial virtual receiver weight is set to zero; if a match is found,
                     ! then the weight can become nonzero
-                    gmtr(i)%recr(j)%weight = 0.0
+                    gmtr(i)%recr(j)%weight   = 0.0
+                    gmtr(i)%recr(j)%weight_p = 0.0
+                    gmtr(i)%recr(j)%weight_s = 0.0
 
                     ! Virtual receiver time
                     select case (which_medium)
@@ -436,7 +438,9 @@ contains
                                         .and. gmtr(i)%recr(j)%y == gmtr_real(j)%srcr(1)%y &
                                         .and. gmtr(i)%recr(j)%z == gmtr_real(j)%srcr(1)%z) then
                                     ttp(i)%array(j, 1) = ttp_real(j)%array(l, 1)
-                                    gmtr(i)%recr(j)%weight = gmtr_real(j)%recr(l)%weight
+                                    gmtr(i)%recr(j)%weight   = gmtr_real(j)%recr(l)%weight
+                                    gmtr(i)%recr(j)%weight_p = gmtr_real(j)%recr(l)%weight_p
+                                    gmtr(i)%recr(j)%weight_s = gmtr_real(j)%recr(l)%weight_s
                                     gmtr(i)%recr(j)%aoff = gmtr_real(j)%recr(l)%aoff
 
                                     ! Buffer mapping information for writing later (safer than writing in nested loops)
@@ -464,7 +468,9 @@ contains
                                         .and. gmtr(i)%recr(j)%z == gmtr_real(j)%srcr(1)%z) then
                                     ttp(i)%array(j, 1) = ttp_real(j)%array(l, 1)
                                     tts(i)%array(j, 1) = tts_real(j)%array(l, 1)
-                                    gmtr(i)%recr(j)%weight = gmtr_real(j)%recr(l)%weight
+                                    gmtr(i)%recr(j)%weight   = gmtr_real(j)%recr(l)%weight
+                                    gmtr(i)%recr(j)%weight_p = gmtr_real(j)%recr(l)%weight_p
+                                    gmtr(i)%recr(j)%weight_s = gmtr_real(j)%recr(l)%weight_s
                                     gmtr(i)%recr(j)%aoff = gmtr_real(j)%recr(l)%aoff
 
                                     ! Buffer mapping information for writing later (safer than writing in nested loops)
@@ -754,7 +760,15 @@ contains
         do i = 1, gmtr(ishot)%nr
             do j = 1, size(ttp_residual, 2)
 
-                weight(i, j) = gmtr(ishot)%recr(i)%weight*misfit_weight(j)
+                if (yn_separate_ps_weight) then
+                    if (label == 'p') then
+                        weight(i, j) = gmtr(ishot)%recr(i)%weight_p*misfit_weight(j)
+                    else
+                        weight(i, j) = gmtr(ishot)%recr(i)%weight_s*misfit_weight(j)
+                    end if
+                else
+                    weight(i, j) = gmtr(ishot)%recr(i)%weight*misfit_weight(j)
+                end if
 
                 if (abs(ttp_residual(i, j)) > misfit_threshold) then
                     weight(i, j) = 0

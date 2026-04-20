@@ -235,7 +235,9 @@ module parameters
     type receiver
         real :: x, y, z
         real :: aoff
-        real :: weight = 1.0
+        real :: weight = 1.0    ! master enable: non-zero if receiver is active for any wave
+        real :: weight_p = 1.0  ! P-wave scalar weight (equals weight in 4-column format)
+        real :: weight_s = 1.0  ! S-wave scalar weight (equals weight in 4-column format)
         real :: t0 = 0.0
     end type receiver
 
@@ -254,6 +256,9 @@ module parameters
     logical :: yn_exchange_sr
     integer :: nr_virtual
     logical :: yn_dd_no_st0
+
+    ! True when geometry files use the 5-column format (x y z weight_p weight_s)
+    logical :: yn_separate_ps_weight = .false.
 
 contains
 
@@ -538,6 +543,9 @@ contains
         logical, allocatable, dimension(:) :: qs
         integer, allocatable, dimension(:) :: usid
         type(source_receiver_geometry), allocatable, dimension(:) :: g
+        character(len=512) :: geom_line
+        real :: wp, ws
+        integer :: ios5
 
         if (rankid == 0) then
             call warn(date_time_compact()//' Loading geometry... ')
@@ -575,7 +583,25 @@ contains
             read(4, *) gmtr(i)%nr
             allocate(gmtr(i)%recr(1:gmtr(i)%nr))
             do j = 1, gmtr(i)%nr
-                read (4, *) gmtr(i)%recr(j)%x, gmtr(i)%recr(j)%y, gmtr(i)%recr(j)%z, gmtr(i)%recr(j)%weight
+                read(4, '(A)') geom_line
+                ! Try reading 5 values (x y z weight_p weight_s); ios5 /= 0 means only 4 values
+                read(geom_line, *, iostat=ios5) &
+                    gmtr(i)%recr(j)%x, gmtr(i)%recr(j)%y, gmtr(i)%recr(j)%z, wp, ws
+                if (ios5 == 0) then
+                    ! 5-column format: separate P- and S-wave weights
+                    gmtr(i)%recr(j)%weight_p = wp
+                    gmtr(i)%recr(j)%weight_s = ws
+                    ! master enable is non-zero when either wave has data
+                    gmtr(i)%recr(j)%weight = max(wp, ws)
+                    yn_separate_ps_weight = .true.
+                else
+                    ! 4-column format: single unified weight (backward-compatible)
+                    read(geom_line, *) &
+                        gmtr(i)%recr(j)%x, gmtr(i)%recr(j)%y, gmtr(i)%recr(j)%z, &
+                        gmtr(i)%recr(j)%weight
+                    gmtr(i)%recr(j)%weight_p = gmtr(i)%recr(j)%weight
+                    gmtr(i)%recr(j)%weight_s = gmtr(i)%recr(j)%weight
+                end if
             end do
 
             close(4)
@@ -591,6 +617,13 @@ contains
 
         end do
         close(3)
+
+        ! For acoustic media, S-wave weight is not applicable
+        if (which_medium == 'acoustic-iso' .or. which_medium == 'acoustic-tti') then
+            do i = 1, ns
+                gmtr(i)%recr(:)%weight_s = 0.0
+            end do
+        end if
 
         ! Check validity of geometry
         do i = 1, ns
@@ -641,7 +674,9 @@ contains
                         gmtr(i)%recr(j)%weight /= 0) then
                     l = l + 1
                 else
-                    gmtr(i)%recr(j)%weight = 0.0
+                    gmtr(i)%recr(j)%weight   = 0.0
+                    gmtr(i)%recr(j)%weight_p = 0.0
+                    gmtr(i)%recr(j)%weight_s = 0.0
                 end if
 
             end do
@@ -875,8 +910,12 @@ contains
         end if
         where (geom%srcr(:)%x < shot_xbeg) geom%srcr(:)%amp = 0.0
         where (geom%srcr(:)%x > shot_xend) geom%srcr(:)%amp = 0.0
-        where (geom%recr(:)%x < shot_xbeg) geom%recr(:)%weight = 0.0
-        where (geom%recr(:)%x > shot_xend) geom%recr(:)%weight = 0.0
+        where (geom%recr(:)%x < shot_xbeg) geom%recr(:)%weight   = 0.0
+        where (geom%recr(:)%x < shot_xbeg) geom%recr(:)%weight_p = 0.0
+        where (geom%recr(:)%x < shot_xbeg) geom%recr(:)%weight_s = 0.0
+        where (geom%recr(:)%x > shot_xend) geom%recr(:)%weight   = 0.0
+        where (geom%recr(:)%x > shot_xend) geom%recr(:)%weight_p = 0.0
+        where (geom%recr(:)%x > shot_xend) geom%recr(:)%weight_s = 0.0
 
         if (yn_adpy) then
             shot_ybeg = max(ymin, min( &
@@ -893,8 +932,12 @@ contains
         end if
         where (geom%srcr(:)%y < shot_ybeg) geom%srcr(:)%amp = 0.0
         where (geom%srcr(:)%y > shot_yend) geom%srcr(:)%amp = 0.0
-        where (geom%recr(:)%y < shot_ybeg) geom%recr(:)%weight = 0.0
-        where (geom%recr(:)%y > shot_yend) geom%recr(:)%weight = 0.0
+        where (geom%recr(:)%y < shot_ybeg) geom%recr(:)%weight   = 0.0
+        where (geom%recr(:)%y < shot_ybeg) geom%recr(:)%weight_p = 0.0
+        where (geom%recr(:)%y < shot_ybeg) geom%recr(:)%weight_s = 0.0
+        where (geom%recr(:)%y > shot_yend) geom%recr(:)%weight   = 0.0
+        where (geom%recr(:)%y > shot_yend) geom%recr(:)%weight_p = 0.0
+        where (geom%recr(:)%y > shot_yend) geom%recr(:)%weight_s = 0.0
 
         if (yn_adpz) then
             shot_zbeg = max(zmin, min( &
@@ -911,8 +954,12 @@ contains
         end if
         where (geom%srcr(:)%z < shot_zbeg) geom%srcr(:)%amp = 0.0
         where (geom%srcr(:)%z > shot_zend) geom%srcr(:)%amp = 0.0
-        where (geom%recr(:)%z < shot_zbeg) geom%recr(:)%weight = 0.0
-        where (geom%recr(:)%z > shot_zend) geom%recr(:)%weight = 0.0
+        where (geom%recr(:)%z < shot_zbeg) geom%recr(:)%weight   = 0.0
+        where (geom%recr(:)%z < shot_zbeg) geom%recr(:)%weight_p = 0.0
+        where (geom%recr(:)%z < shot_zbeg) geom%recr(:)%weight_s = 0.0
+        where (geom%recr(:)%z > shot_zend) geom%recr(:)%weight   = 0.0
+        where (geom%recr(:)%z > shot_zend) geom%recr(:)%weight_p = 0.0
+        where (geom%recr(:)%z > shot_zend) geom%recr(:)%weight_s = 0.0
 
         ! Range for each shot
         shot_nxbeg = clip(int((shot_xbeg - ox)/dx) + 1, 1, nx)
