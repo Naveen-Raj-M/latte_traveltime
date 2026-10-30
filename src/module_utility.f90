@@ -262,10 +262,6 @@ contains
         integer, allocatable, dimension(:) :: valid_p, valid_s
         integer :: total_matches
 
-        ! Buffered mapping data to write at the end (safer than writing in loops)
-        integer, allocatable, dimension(:, :) :: mapping_buffer_int
-        real, allocatable, dimension(:, :) :: mapping_buffer_real
-        integer :: mapping_count, mapping_capacity
         integer :: funit, k
 
         ! The number of sources might be >> the number of stations/receivers.
@@ -278,7 +274,6 @@ contains
 
             ! Initialize counters
             total_matches = 0
-            mapping_count = 0
 
             if (rankid == 0) then
                 call warn('')
@@ -300,14 +295,6 @@ contains
             end do
             rxyz = unique(rxyz, cols=[1, 2, 3])
             nr = size(rxyz, 1)
-
-            ! Allocate buffers to collect mapping data (write at end for safety)
-            ! Each mapping entry: virtual_shot_id, virtual_receiver_id, original_shot_id, original_receiver_id
-            mapping_capacity = nr * ns
-            if (rankid == 0) then
-                allocate(mapping_buffer_int(mapping_capacity, 4))
-                allocate(mapping_buffer_real(mapping_capacity, 2))
-            end if
 
             allocate (ttp_real(1:ns))
             allocate (tts_real(1:ns))
@@ -443,17 +430,6 @@ contains
                                     gmtr(i)%recr(j)%weight_s = gmtr_real(j)%recr(l)%weight_s
                                     gmtr(i)%recr(j)%aoff = gmtr_real(j)%recr(l)%aoff
 
-                                    ! Buffer mapping information for writing later (safer than writing in nested loops)
-                                    if (rankid == 0) then
-                                        mapping_count = mapping_count + 1
-                                        mapping_buffer_int(mapping_count, 1) = i
-                                        mapping_buffer_int(mapping_count, 2) = j - 1
-                                        mapping_buffer_int(mapping_count, 3) = gmtr_real(j)%id
-                                        mapping_buffer_int(mapping_count, 4) = l - 1
-                                        mapping_buffer_real(mapping_count, 1) = ttp_real(j)%array(l, 1)
-                                        mapping_buffer_real(mapping_count, 2) = 0.0
-                                    end if
-
                                     total_matches = total_matches + 1
                                     cycle
                                 end if
@@ -472,17 +448,6 @@ contains
                                     gmtr(i)%recr(j)%weight_p = gmtr_real(j)%recr(l)%weight_p
                                     gmtr(i)%recr(j)%weight_s = gmtr_real(j)%recr(l)%weight_s
                                     gmtr(i)%recr(j)%aoff = gmtr_real(j)%recr(l)%aoff
-
-                                    ! Buffer mapping information for writing later (safer than writing in nested loops)
-                                    if (rankid == 0) then
-                                        mapping_count = mapping_count + 1
-                                        mapping_buffer_int(mapping_count, 1) = i
-                                        mapping_buffer_int(mapping_count, 2) = j - 1
-                                        mapping_buffer_int(mapping_count, 3) = gmtr_real(j)%id
-                                        mapping_buffer_int(mapping_count, 4) = l - 1
-                                        mapping_buffer_real(mapping_count, 1) = ttp_real(j)%array(l, 1)
-                                        mapping_buffer_real(mapping_count, 2) = tts_real(j)%array(l, 1)
-                                    end if
 
                                     total_matches = total_matches + 1
                                     cycle
@@ -523,43 +488,8 @@ contains
                 end do
                 close(funit)
 
-                ! Write shot mapping file
-                open(newunit=funit, file=tidy(dir_working)//'/shot_mapping.txt', status='replace')
-                write(funit, '(A)') '# Shot Index Mapping File'
-                write(funit, '(A)') '# Maps virtual receiver indices to original shot IDs'
-                write(funit, '(A)') '# Format: virtual_receiver_index original_shot_id'
-                do k = 1, size(gmtr_real)
-                    write(funit, '(I0,1X,I0)') k-1, gmtr_real(k)%id
-                end do
-                close(funit)
-
-                ! Write exchange mapping file with all buffered data
-                open(newunit=funit, file=tidy(dir_working)//'/exchange_mapping.txt', status='replace')
-                write(funit, '(A)') '# Exchange Mapping File'
-                write(funit, '(A)') '# Format: virtual_shot_id virtual_receiver_id original_shot_id original_receiver_id travel_time_p travel_time_s'
-                write(funit, '(A)') '# This file maps every virtual shot-receiver pair to its original counterpart'
-                do k = 1, mapping_count
-                    write(funit, '(I0,1X,I0,1X,I0,1X,I0,1X,F12.6,1X,F12.6)') &
-                        mapping_buffer_int(k, 1), mapping_buffer_int(k, 2), &
-                        mapping_buffer_int(k, 3), mapping_buffer_int(k, 4), &
-                        mapping_buffer_real(k, 1), mapping_buffer_real(k, 2)
-                end do
-                write(funit, '(A)') '# Exchange Summary:'
-                write(funit, '(A,I0)') '# Original shots: ', size(gmtr_real)
-                write(funit, '(A,I0)') '# Virtual sources: ', nr
-                write(funit, '(A,I0)') '# Virtual receivers per source: ', size(gmtr_real)
-                write(funit, '(A,I0)') '# Total reciprocal matches: ', mapping_count
-                write(funit, '(A,I0)') '# Total possible pairs: ', nr * size(gmtr_real)
-                write(funit, '(A,F8.3)') '# Match rate (%): ', real(mapping_count) / real(nr * size(gmtr_real)) * 100.0
-                close(funit)
-
-                ! Deallocate buffers
-                deallocate(mapping_buffer_int, mapping_buffer_real)
-
-                call warn(date_time_compact()//' Exchange mapping files created:')
-                call warn('  - exchange_mapping.txt (detailed shot-receiver mappings)')
+                call warn(date_time_compact()//' Exchange geometry file created:')
                 call warn('  - exchange_geometry.txt (virtual source positions)')
-                call warn('  - shot_mapping.txt (virtual receiver index to shot ID mapping)')
             end if
 
             call mpibarrier
