@@ -23,3 +23,5 @@ max_vp = 2500
 
 misfit_type = ad
 dir_working = test_ad
+
+#yn_continue = y

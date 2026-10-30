@@ -1,5 +1,5 @@
 !
-! © 2024. Triad National Security, LLC. All rights reserved.
+! © 2024-2026. Triad National Security, LLC. All rights reserved.
 !
 ! This program was produced under U.S. Government contract 89233218CNA000001
 ! for Los Alamos National Laboratory (LANL), which is operated by
@@ -194,6 +194,16 @@ contains
 
         do i = 1, nmodel
 
+            ! The reflectors change only in the joint update of their depths
+            ! (step_max_refl > 0): row l of the search direction holds the depth
+            ! change of reflector l by column
+            if (model_m(i)%name == 'refl') then
+                if (model_step(i) /= 0) then
+                    call move_reflector(model_m(i)%array, model_step(i)*model_srch(i)%array*step)
+                end if
+                cycle
+            end if
+
             model_m(i)%array = model_m(i)%array + model_step(i)*model_srch(i)%array*step
 
             ! Box-clip model
@@ -203,11 +213,6 @@ contains
                 end where
             else
                 model_m(i)%array = clip(model_m(i)%array, model_min(i), model_max(i))
-            end if
-
-            ! For TRTT, the search direction is the reflector's image
-            if (model_m(i)%name == 'refl') then
-                model_m(i)%array = model_srch(i)%array
             end if
 
         end do
@@ -252,7 +257,9 @@ contains
                 case ('c', 'C')
                     valstep = 1.0e9
                 case ('refl')
-                    valstep = 1.0
+                    ! Largest change of a reflector depth in the joint update; zero
+                    ! leaves the reflectors to imaging and refinement
+                    valstep = 0.0
                 case ('sx')
                     valstep = 0.1*(nx - 1)*dx
                 case ('sy')
@@ -561,7 +568,7 @@ contains
         else
             ! Otherwise, use conventional trial-error approach
 
-            do while (trial_misfit > data_misfit_current .and. cnt < nsearch_max)
+            do while (trial_misfit > jumpout_factor*data_misfit_current .and. cnt < nsearch_max)
 
                 step_scaling_factor = step_scaling_factor/2.0
 
@@ -582,7 +589,7 @@ contains
 
             end do
 
-            if (trial_misfit > data_misfit_current) then
+            if (trial_misfit > jumpout_factor*data_misfit_current) then
                 ! When searching the optimal step size, if the trial step size
                 ! at the final trial cannot produce a smaller data misfit than
                 ! that of the last iteration, then set step size to zero
@@ -606,7 +613,7 @@ contains
 
         end if
 
-        ! print perturbation infomation
+        ! Print perturbation infomation
         call print_perturb_info
 
         ! Current absolute data misfit
@@ -620,7 +627,7 @@ contains
             call warn(date_time_compact()//' >>>>>>>>>> Step size computation completed.')
         end if
 
-        ! update model and output updated model for current iteration
+        ! Update model and output updated model for current iteration
         call update_model(step_scaling_factor)
         if (rankid == 0) then
             call output_updated_model
@@ -638,7 +645,6 @@ contains
         integer :: cnt
         real :: al, ar, ac, fl, fr, fc, a0
         real :: acr, arl, alc, bcr, brl, blc, num, den, an, fn, a2, f2
-        !        real :: step0,
         real :: misfit0, step1, misfit1, step2, misfit2
         character(len=1024) :: dir_from, dir_to
 
@@ -814,7 +820,7 @@ contains
 
         123 continue
 
-        if (fc >= misfit0) then
+        if (fc >= jumpout_factor*misfit0) then
             ! When searching optimal step size, if the trial step size
             ! at the final trial cannot produce a smaller data misfit than
             ! that of the last iteration, then set step size to zero
@@ -957,12 +963,20 @@ contains
     !
     subroutine compute_step_size
 
+        ! Define a relaxation factor that allows later-iteration misfit > current iteration
+        if (trigger_jumpout) then
+            ! When there are three same misfits, jump out by default
+            call readpar_xfloat(file_parameter, 'jumpout_factor', jumpout_factor, 1.05, 1.0*iter)
+        else
+            call readpar_xfloat(file_parameter, 'jumpout_factor', jumpout_factor, 1.0, 1.0*iter)
+        end if
+
         select case (step_size_method)
             case ('linear')
                 call compute_step_size_linear
             case ('quadratic')
                 call compute_step_size_quadratic
-            case ('line_search')
+            case ('line-search', 'line_search')
                 call compute_step_size_linesearch
         end select
 

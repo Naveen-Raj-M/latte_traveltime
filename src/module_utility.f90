@@ -1,5 +1,5 @@
 !
-! © 2024. Triad National Security, LLC. All rights reserved.
+! © 2024-2026. Triad National Security, LLC. All rights reserved.
 !
 ! This program was produced under U.S. Government contract 89233218CNA000001
 ! for Los Alamos National Laboratory (LANL), which is operated by
@@ -130,37 +130,46 @@ contains
 
         integer :: i, tmpi, tmpr
         character(len=1) :: nl = char(10)
+        real :: misfit0
+        integer :: m
 
         if (resume_from_iter == 1 .and. iter == 0) then
+
             misfit0 = 0.0
-            ! allocate array for misfit array
+
+            ! Allocate memory for misfit arrays
             call alloc_array(shot_misfit, [1, ns, 0, niter_max])
             call alloc_array(step_misfit, [1, ns])
             call alloc_array(data_misfit, [0, niter_max + 1])
 
-            ! create misfit history ascii file if new inversion
-            open (2, file=tidy(file_datamisfit), status='replace')
-            close (2)
+            ! Create misfit history ascii file if new inversion
+            open (33, file=tidy(file_datamisfit), status='replace')
+            close (33)
+
         end if
 
         if (resume_from_iter > 1 .and. iter == 0) then
-            ! allocate array for misfit array
+
+            ! Allocate memory for misfit arrays
             call alloc_array(shot_misfit, [1, ns, 0, niter_max])
             call alloc_array(step_misfit, [1, ns])
             call alloc_array(data_misfit, [0, niter_max + 1])
 
-            ! read existing misfit history if continued inversion
-            open (2, file=tidy(file_datamisfit), status='old')
+            ! Read existing misfit history if continued inversion
+            open (33, file=tidy(file_datamisfit), status='old')
             do i = 0, resume_from_iter - 1
-                read (2, *) tmpi, data_misfit(i), tmpr
+                read (33, *) tmpi, data_misfit(i), tmpr
             end do
-            close (2)
-            open (3, file=tidy(file_shotmisfit), status='old', access='stream', form='unformatted')
-            do i = 1, resume_from_iter - 1
-                read (3) shot_misfit(:, i)
+            close (33)
+
+            open (33, file=tidy(file_shotmisfit), status='old', access='stream', form='unformatted')
+            do i = 0, resume_from_iter - 1
+                read (33) shot_misfit(:, i)
             end do
-            close (3)
+            close (33)
+
             misfit0 = data_misfit(0)
+
         end if
 
         ! Only in rank 0
@@ -174,32 +183,42 @@ contains
 
             if (iter == 1 .and. misfit0 == 0) then
                 misfit0 = data_misfit(0)
-                open (2, file=tidy(file_datamisfit), position='append')
-                write (2, '(i4,es18.10,es18.10)') 0, misfit0, 1.0
-                close (2)
+                open (33, file=tidy(file_datamisfit), position='append')
+                write (33, '(i4,es18.7,es18.7)') 0, misfit0, 1.0
+                close (33)
             end if
 
             ! Misfit information
             call warn(date_time_compact()//' >>>>>>>>>> Data misfit: ' &
-                //num2str(data_misfit(iter), '(es18.10)'))
+                //num2str(data_misfit(iter), '(es18.7)'))
             if (data_misfit(0) == 0) then
                 call warn(date_time_compact()//' >>>>>>>>>> Normalized data misfit: ' &
-                    //num2str(0.0, '(es18.10)'))
+                    //num2str(0.0, '(es18.7)'))
                 stop
             else
                 call warn(date_time_compact()//' >>>>>>>>>> Normalized data misfit: ' &
-                    //num2str(data_misfit(iter)/data_misfit(0), '(es18.10)'))
+                    //num2str(data_misfit(iter)/data_misfit(0), '(es18.7)'))
             end if
 
             ! Save misfit history to ASCII file
-            open (2, file=tidy(file_datamisfit), status='old', form='formatted', access='direct', recl=41)
-            write (2, '(i4,es18.10,es18.10,a)', rec=iter + 1) &
+            open (33, file=tidy(file_datamisfit), status='old', form='formatted', access='direct', recl=41)
+            write (33, '(i4,es18.7,es18.7,a)', rec=iter + 1) &
                 iter, &
                 data_misfit(iter), &
                 data_misfit(iter)/data_misfit(0), nl
-            close (2)
+            close (33)
 
-            ! output shot misfit
+            ! For an inversion that resumes from iter > 1, truncate
+            m = count_nonempty_lines(file_datamisfit)
+            if (m > iter + 1) then
+                open (33, file=tidy(file_datamisfit), status='replace')
+                do i = 0, iter
+                    write (33, '(i4,es18.7,es18.7,a)') i, data_misfit(i), data_misfit(i)/data_misfit(0)
+                end do
+                close (33)
+            end if
+
+            ! Output shot misfit
             shot_misfit(:, iter) = step_misfit
             call output_array(shot_misfit(:, 0:iter), tidy(file_shotmisfit))
 
@@ -211,19 +230,36 @@ contains
 
         if (iter >= 3) then
             if (data_misfit(iter) == data_misfit(iter - 1) .and. data_misfit(iter - 1) == data_misfit(iter - 2)) then
+
                 ! Reduce maximum step size scaling factor
                 step_max_scale_factor = step_max_scale_factor/2.0
-                ! Or just stop the inversion
+
                 if (yn_flat_stop) then
+                    ! If flat-stop is required, then stop
+
                     if (rankid == 0) then
                         call warn(' ')
-                        call warn(date_time_compact()//' Inversion has three consecutive data misfits that are same. ')
-                        call warn(date_time_compact()//' Inversion actually stops. Exiting. ')
+                        call warn(date_time_compact()//' The inversion has three successive iterations with identical data misfits. ')
+                        call warn(date_time_compact()//' Inversion has stopped. Exiting. ')
                         call warn(' ')
                     end if
                     call mpibarrier
                     call mpiend
+
+                else
+
+                    ! Otherwise, when the program arrives here, it means the inversion cannot perform effective misfit reduction
+                    ! anymore. Most likely, it is in some local minimum and cannot find an effective gradient.
+                    ! In this case, in the next iteration, we allow some relaxation for misfits.
+                    trigger_jumpout = .true.
+
+                    if (rankid == 0) then
+                        call warn(date_time_compact()//' Misfit relaxation is enabled. ')
+                        call warn(date_time_compact()//' From next iteration on, misfit may increase. ')
+                    end if
+
                 end if
+
             end if
         end if
 
@@ -239,12 +275,12 @@ contains
 
         if (rankid == 0) then
             if (.not. (data_misfit <= float_huge)) then
-                call warn(date_time_compact()//' Error: Misfit is NaN. Inversion stops.')
+                call warn(date_time_compact()//' Error: Misfit is NaN. Exiting. ')
                 call mpistop
             end if
             call warn(date_time_compact()//' Trial step number: '//num2str(step_number))
-            call warn(date_time_compact()//' Trial step size: '//num2str(step, '(es18.10)'))
-            call warn(date_time_compact()//' Data misfit: '//num2str(data_misfit, '(es18.10)'))
+            call warn(date_time_compact()//' Trial step size: '//num2str(step, '(es18.7)'))
+            call warn(date_time_compact()//' Data misfit: '//num2str(data_misfit, '(es18.7)'))
         end if
 
     end subroutine print_step_info
@@ -610,7 +646,7 @@ contains
     !
     !> Compute travletime misfit for a gather
     !
-    subroutine compute_shot_misfit(ishot, dir_field, label, ttp_syn, ttp_obs, ttp_residual, m, tsyn_all, tobs_all)
+    subroutine compute_shot_misfit(ishot, dir_field, label, ttp_syn, ttp_obs, ttp_residual, m, tsyn_all, tobs_all, weight_used)
 
         !> Source index
         integer, intent(in) :: ishot
@@ -629,10 +665,12 @@ contains
         real, intent(inout) :: m
         !> Nonzero source initiation time
         real, dimension(:, :), intent(in), optional :: tsyn_all, tobs_all
+        !> The weight of each datum in the misfit
+        real, allocatable, dimension(:, :), intent(out), optional :: weight_used
 
         real, allocatable, dimension(:, :) :: weight, ttp_misfit
         integer :: i, j
-        real :: d
+        real :: d, omin, omax
 
         if (yn_dd_no_st0) then
 
@@ -704,30 +742,31 @@ contains
                     weight(i, j) = 0
                 end if
 
-                ! For reflection data
-                if (j > 1 .and. (gmtr(ishot)%recr(i)%aoff < offset_min_refl &
-                        .or. gmtr(ishot)%recr(i)%aoff > offset_max_refl)) then
-                    weight(i, j) = 0
-                end if
-
             end do
         end do
         !$omp end parallel do
+
+        ! For the reflection data of trtt, zero the weights outside the offset
+        ! range in use (reflection_offset_range), which depends on whether the
+        ! reflectors are being imaged or refined
+        if (which_program == 'trtt') then
+            call reflection_offset_range(omin, omax)
+            do i = 1, gmtr(ishot)%nr
+                if (gmtr(ishot)%recr(i)%aoff < omin .or. gmtr(ishot)%recr(i)%aoff > omax) then
+                    weight(i, 2:) = 0
+                end if
+            end do
+        end if
+
+        if (present(weight_used)) then
+            weight_used = weight
+        end if
 
         ! Compute loss
         m = m + sum(ttp_misfit*weight)
 
         ! Output
         ttp_residual = ttp_residual*weight
-
-        ! For reflector image computation, zero out traces if necessary, but cannot multiply non-(0, 1) weights
-        ! because this is real observation for reflector image computation
-        ! For first-arrival-only data, this will not execute
-        do j = 2, size(ttp_residual, 2)
-            where (weight(:, j) == 0)
-                ttp_obs(:, j) = ttp_obs(:, j)*weight(:, j)
-            end where
-        end do
 
     end subroutine compute_shot_misfit
 

@@ -15,7 +15,7 @@ exec = $(PWD)/exec
 all: makedir $(exec)
 
 # options
-flitdir = $(HOME)/src/libflit
+flitdir = $(HOME)/src/flit
 rgmdir = $(HOME)/src/rgm
 
 include $(flitdir)/src/Makefile.in

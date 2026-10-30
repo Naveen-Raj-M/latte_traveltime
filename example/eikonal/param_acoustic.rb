@@ -12,5 +12,6 @@ which_medium = acoustic-iso
 model_name = vp
 file_vp = model/vp.bin
 dir_synthetic = data_acoustic
+
 snaps = 0, 1, 1
 dir_snapshot = snapshot_acoustic

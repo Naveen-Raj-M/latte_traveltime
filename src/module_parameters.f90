@@ -1,5 +1,5 @@
 !
-! © 2024. Triad National Security, LLC. All rights reserved.
+! © 2024-2026. Triad National Security, LLC. All rights reserved.
 !
 ! This program was produced under U.S. Government contract 89233218CNA000001
 ! for Los Alamos National Laboratory (LANL), which is operated by
@@ -48,14 +48,8 @@ module parameters
     ! traveltime gradient storage flag
     logical :: yn_save_traveltime_gradients = .false.
 
-    ! space taper when adaptive range required
-    integer :: space_taperx = 10
-    integer :: space_tapery = 10
-    integer :: space_taperz = 10
-
     ! shot index and division related
     integer, allocatable, dimension(:, :) :: shot_in_rank
-    character(len=1024) :: shot_prefix
     integer :: ishot
     integer, allocatable, dimension(:) :: shot_index, rec_index
     integer, allocatable, dimension(:) :: src_exclude, sid_exclude, rec_exclude
@@ -75,7 +69,7 @@ module parameters
 
     ! only compute misfit
     logical :: yn_misfit_only
-    real :: misfit0, misfit
+    real :: misfit
     real :: val_misfit
 
     ! search direction computation method in inversion
@@ -110,12 +104,18 @@ module parameters
     real, allocatable, dimension(:) :: data_misfit
     real, allocatable, dimension(:, :) :: shot_misfit
     real, allocatable, dimension(:) :: misfit_weight
+    real :: jumpout_factor = 1.0
 
     ! maximum and minimum offset
     real :: offset_min = 0.0d0
     real :: offset_max = float_huge
     real :: offset_min_refl = 0.0d0
     real :: offset_max_refl = float_huge
+    ! Largest offset of the reflections that set the reflector depths, in the
+    ! imaging, the refinement and the image guard of TRTT, and whether these
+    ! are running, so that the reflection misfit uses this offset
+    real :: offset_max_refl_depth = float_huge
+    logical :: yn_refl_depth_offsets = .false.
 
     ! source id
     integer :: sid_min = 1
@@ -140,6 +140,11 @@ module parameters
     real :: adpextray = 0.0
     real :: adpextraz = 0.0
 
+    ! taper lengths at the sides of an adaptive range that lie inside the model
+    real :: adptaperx = 0.0
+    real :: adptapery = 0.0
+    real :: adptaperz = 0.0
+
     integer, allocatable, dimension(:) :: sid_select, src_select
 
     character(len=24) :: aniso_param = 'thomsen'
@@ -149,11 +154,9 @@ module parameters
     logical :: verbose
     integer :: sweep_niter_max = 10
     real :: sweep_stop_threshold = 1.0e-4
-    character(len=32) :: forward_eikonal_method
+    character(len=12) :: adjoint_receiver = 'nearest'
     real :: misfit_threshold
-    real :: energybal_power = 1.0
 
-    character(len=1024) :: dir_gradmask
     character(len=1024) :: file_andfaux, file_andfcoh
 
     integer :: resume_from_iter
@@ -161,13 +164,8 @@ module parameters
     character(len=1024) :: file_datamisfit, file_shotmisfit
     logical :: yn_continue_inv = .false.
     logical :: yn_enforce_update = .false.
+    logical :: trigger_jumpout = .false.
     logical :: put_synthetic_in_scratch = .false.
-
-    character(len=32), allocatable, dimension(:) :: record_processing
-    character(len=32), allocatable, dimension(:) :: encoded_record_processing
-    character(len=32), allocatable, dimension(:) :: synthetic_processing
-    character(len=32), allocatable, dimension(:) :: gradient_processing
-    character(len=32), allocatable, dimension(:) :: adjoint_source_processing
 
     character(len=32), allocatable, dimension(:) :: process_shot_grad, process_grad
 
@@ -188,8 +186,7 @@ module parameters
     character(len=32) :: data_prefix = 'traveltime'
 
     integer :: nrefl = 0
-    real :: reflector_imaging_threshold = 1.0e-9
-    logical :: yn_update_reflector
+    logical :: yn_update_reflector = .false.
     logical :: yn_precond = .true.
     logical :: yn_output_dws = .false.
 
@@ -305,7 +302,7 @@ contains
         end select
         call mpibarrier
 
-        call bcast_array(file_parameter)
+        call bcast(file_parameter)
 
         ! which kind of medium
         call readpar_string(file_parameter, 'which_medium', which_medium, 'acoustic-iso')
@@ -316,8 +313,6 @@ contains
         call readpar_float(file_parameter, 'vpvsratio_smoothz', vpvsratio_smoothz, 0.0)
         call readpar_string(file_parameter, 'incident_wave', incident_wave, 'p')
 
-        call readpar_string(file_parameter, 'data_prefix', data_prefix, 'traveltime')
-        call readpar_float(file_parameter, 'energybal_power', energybal_power, 1.0)
         call readpar_float(file_parameter, 'misfit_threshold', misfit_threshold, float_huge)
 
         call readpar_int(file_parameter, 'ns', ns, 1)
@@ -378,9 +373,9 @@ contains
         call readpar_float(file_parameter, 'adp_extrax', adpextrax, 0.0)
         call readpar_float(file_parameter, 'adp_extray', adpextray, 0.0)
         call readpar_float(file_parameter, 'adp_extraz', adpextraz, 0.0)
-        call readpar_int(file_parameter, 'adp_taperx', space_taperx, 0)
-        call readpar_int(file_parameter, 'adp_tapery', space_tapery, 0)
-        call readpar_int(file_parameter, 'adp_taperz', space_taperz, 0)
+        call readpar_float(file_parameter, 'adp_taperx', adptaperx, 0.0)
+        call readpar_float(file_parameter, 'adp_tapery', adptapery, 0.0)
+        call readpar_float(file_parameter, 'adp_taperz', adptaperz, 0.0)
 
         call readpar_string(file_parameter, 'step_size_method', step_size_method, 'linear')
         call readpar_logical(file_parameter, 'yn_precond', yn_precond, .true.)
@@ -405,20 +400,23 @@ contains
         call readpar_logical(file_parameter, 'verbose', verbose, .false.)
         call readpar_float(file_parameter, 'sweep_stop_threshold', sweep_stop_threshold, 1.0e-4)
         call readpar_int(file_parameter, 'sweep_niter_max', sweep_niter_max, 10)
-        call readpar_string(file_parameter, 'forward_eikonal_method', forward_eikonal_method, 'fast_sweep')
+        ! How FATT injects the traveltime residuals at the receivers into the
+        ! adjoint-state equation; TRTT and TLOC always use nearest
+        call readpar_string(file_parameter, 'adjoint_receiver', adjoint_receiver, 'nearest')
+        call assert(any_in([adjoint_receiver], ['nearest', 'linear']), &
+            ' <read_parameters> Error: adjoint_receiver must be one of nearest, linear')
 
         call readpar_string(file_parameter, 'file_data_misfit', file_datamisfit, tidy(dir_working)//'/data_misfit.txt')
         call readpar_string(file_parameter, 'file_shot_misfit', file_shotmisfit, tidy(dir_working)//'/shot_misfit.bin')
 
         call readpar_logical(file_parameter, 'yn_continue', yn_continue_inv, .false.)
-        if (yn_continue_inv) then
+        if (yn_continue_inv .and. file_exists(file_datamisfit)) then
             resume_from_iter = max(1, count_nonempty_lines(file_datamisfit))
         else
             call readpar_int(file_parameter, 'resume_from_iter', resume_from_iter, 1)
         end if
 
-        call readpar_nstring(file_parameter, 'process_record', record_processing, [''])
-        call readpar_nstring(file_parameter, 'process_synthetic', synthetic_processing, [''])
+        call readpar_logical(file_parameter, 'uniform_processing', uniform_processing, .true.)
         call readpar_logical(file_parameter, 'yn_flat_stop', yn_flat_stop, .false.)
 
         if (which_program == 'eikonal') then
@@ -478,17 +476,12 @@ contains
         select case (which_medium)
             case ('acoustic-iso', 'acoustic-tti')
                 call readpar_nstring(file_parameter, 'data_name', data_name, ['p'])
-                call assert(size(data_name) == 1 .and. data_name(1) == 'p', &
-                    ' <read_parameter> Error: For acoustic, data_name must = p' )
             case('elastic-iso', 'elastic-tti')
                 call readpar_nstring(file_parameter, 'data_name', data_name, ['p', 's'])
-                call assert(size(data_name) == 2 .and. data_name(1) == 'p' .and. data_name(2) == 's', &
-                    ' <read_parameter> Error: For acoustic, data_name must = p, s' )
         end select
         ndata = size(data_name)
 
         if (which_program == 'trtt') then
-            call readpar_float(file_parameter, 'reflector_imaging_threshold', reflector_imaging_threshold, 1.0e-9)
             call readpar_int(file_parameter, 'nrefl', nrefl, 1)
             call readpar_nfloat(file_parameter, 'misfit_weight', misfit_weight, ones(nrefl + 1))
             call assert(size(misfit_weight) == nrefl + 1, ' <read_parameter> Error: size(misfit_weight) must be nrefl + 1. Exiting. ')
@@ -497,6 +490,7 @@ contains
             end if
             call readpar_float(file_parameter, 'offset_min_refl', offset_min_refl, 0.0)
             call readpar_float(file_parameter, 'offset_max_refl', offset_max_refl, float_huge)
+            call readpar_float(file_parameter, 'offset_max_refl_depth', offset_max_refl_depth, offset_max_refl)
         else
             call readpar_nfloat(file_parameter, 'misfit_weight', misfit_weight, ones(1))
         end if
@@ -671,6 +665,7 @@ contains
                         gmtr(i)%recr(j)%z >= rzmin .and. gmtr(i)%recr(j)%z <= rzmax .and. &
                         gmtr(i)%recr(j)%aoff >= offset_min .and. gmtr(i)%recr(j)%aoff <= offset_max .and. &
                         j >= rec_min .and. j <= rec_max .and. mod(j - rec_min, rec_every) == 0 .and. &
+                        .not. any(rec_exclude == j) .and. &
                         gmtr(i)%recr(j)%weight /= 0) then
                     l = l + 1
                 else
@@ -824,12 +819,24 @@ contains
         call assert(zmax >= zmin, ' <set_regular_space> Error: zmax must >= zmin')
 
         ! Target model origins
+        ! Note: n# are computed with nint rather than ceiling, because ceiling is
+        ! sensitive to floating-point round-off. For instance, with ox = 0,
+        ! dx = 11.2220842 and nx = 16, the default xmax = ox + (nx - 1)*dx gives
+        ! (xmax - xmin)/dx = 15.000001 instead of 15, and ceiling would add a
+        ! spurious grid point. The price is that in rare cases, when xmax - xmin
+        ! is not a multiple of dx, the model will be shortened by up to half a
+        ! grid interval, e.g., xmax - xmin = 120.4 with dx = 10 gives a model
+        ! ending at xmin + 120 rather than xmin + 130. A rigorous solution, which
+        ! always covers xmax and still ignores round-off, is
+        !     nx = ceiling((xmax - xmin - 4*spacing(max(abs(xmin), abs(xmax))))/dx) + 1
+        ! where spacing(x) is the gap between adjacent floats near x. The round-off
+        ! in xmax - xmin is at most about 2 such gaps, so 4 gives a safety margin.
         ox = xmin
         oy = ymin
         oz = zmin
-        nx = ceiling((xmax - xmin)/dx) + 1
-        ny = ceiling((ymax - ymin)/dy) + 1
-        nz = ceiling((zmax - zmin)/dz) + 1
+        nx = nint((xmax - xmin)/dx) + 1
+        ny = nint((ymax - ymin)/dy) + 1
+        nz = nint((zmax - zmin)/dz) + 1
 
         ! Check if requires model interpolation
         if (nx /= nx0 .or. ny /= ny0 .or. nz /= nz0 .or. &
@@ -962,12 +969,12 @@ contains
         where (geom%recr(:)%z > shot_zend) geom%recr(:)%weight_s = 0.0
 
         ! Range for each shot
-        shot_nxbeg = clip(int((shot_xbeg - ox)/dx) + 1, 1, nx)
-        shot_nxend = clip(int((shot_xend - ox)/dx) + 1, 1, nx)
-        shot_nybeg = clip(int((shot_ybeg - oy)/dy) + 1, 1, ny)
-        shot_nyend = clip(int((shot_yend - oy)/dy) + 1, 1, ny)
-        shot_nzbeg = clip(int((shot_zbeg - oz)/dz) + 1, 1, nz)
-        shot_nzend = clip(int((shot_zend - oz)/dz) + 1, 1, nz)
+        shot_nxbeg = clip(nint((shot_xbeg - ox)/dx) + 1, 1, nx)
+        shot_nxend = clip(nint((shot_xend - ox)/dx) + 1, 1, nx)
+        shot_nybeg = clip(nint((shot_ybeg - oy)/dy) + 1, 1, ny)
+        shot_nyend = clip(nint((shot_yend - oy)/dy) + 1, 1, ny)
+        shot_nzbeg = clip(nint((shot_zbeg - oz)/dz) + 1, 1, nz)
+        shot_nzend = clip(nint((shot_zend - oz)/dz) + 1, 1, nz)
 
         shot_nx = shot_nxend - shot_nxbeg + 1
         shot_ny = shot_nyend - shot_nybeg + 1
@@ -1014,5 +1021,23 @@ contains
         y = norm2([s%x, s%y, s%z] - [r%x, r%y, r%z]) <= threshold
 
     end function source_receiver_coincide
+
+    !
+    !> The offset range of the reflection data in use. While TRTT images or
+    !> refines the reflectors, the largest offset is offset_max_refl_depth,
+    !> within offset_max_refl.
+    !
+    subroutine reflection_offset_range(omin, omax)
+
+        real, intent(out) :: omin, omax
+
+        omin = offset_min_refl
+        if (yn_refl_depth_offsets) then
+            omax = min(offset_max_refl_depth, offset_max_refl)
+        else
+            omax = offset_max_refl
+        end if
+
+    end subroutine reflection_offset_range
 
 end module parameters

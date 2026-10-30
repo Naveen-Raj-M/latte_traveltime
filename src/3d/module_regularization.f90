@@ -1,5 +1,5 @@
 !
-! © 2024. Triad National Security, LLC. All rights reserved.
+! © 2024-2026. Triad National Security, LLC. All rights reserved.
 !
 ! This program was produced under U.S. Government contract 89233218CNA000001
 ! for Los Alamos National Laboratory (LANL), which is operated by
@@ -229,6 +229,7 @@ contains
                     call readpar_xfloat(file_parameter, 'reg_andf_sigma', param%sigma, 10.0, iter*1.0)
                     call readpar_xfloat(file_parameter, 'reg_andf_powerm', param%powerm, 4.0, iter*1.0)
                     call readpar_xstring(file_parameter, 'reg_andf_aux', file_aux, '', iter*1.0)
+                    call readpar_xstring(file_parameter, 'reg_andf_coh', file_coh, '', iter*1.0)
                     if (file_aux /= '' .and. file_coh == '') then
                         maux = load(file_aux, n1, n2, n3)
                         mt = andf_filt_mpi(mt, param, aux=maux)
@@ -330,7 +331,7 @@ contains
         real, allocatable, dimension(:, :, :) :: sx, sy, sz, st0
         real, allocatable, dimension(:, :, :) :: sxr, syr, szr
         integer :: i, ic
-        type(hdbscan_param) :: p
+        type(hdbscan) :: p
         integer, allocatable, dimension(:) :: unindex, sindex
         integer :: nc
         real, allocatable, dimension(:) :: pr1, pr2, pr3
@@ -391,15 +392,13 @@ contains
                     case('clustering-fit')
 
                         ! Clustering
-                        p%n = nr_virtual
                         p%data = zeros(nr_virtual, 3)
                         p%data(:, 1) = szr(:, 1, 1)
                         p%data(:, 2) = syr(:, 1, 1)
                         p%data(:, 3) = sxr(:, 1, 1)
-                        p%nd = 3
-                        call readpar_xint(file_parameter, 'clustering_fit_min_sample', p%min_sample, nint(0.25*nr_virtual), iter*1.0)
+                        call readpar_xint(file_parameter, 'clustering_fit_min_sample', p%min_samples, nint(0.25*nr_virtual), iter*1.0)
                         call readpar_xint(file_parameter, 'clustering_fit_min_cluster_size', p%min_cluster_size, nint(0.25*nr_virtual), iter*1.0)
-                        call hdbscan(p)
+                        call p%cluster
 
                         ! Find unique labels
                         unindex = sort(unique(p%labels))
@@ -413,7 +412,7 @@ contains
                         do ic = 2, nc
 
                             ! Select points associated with label_i
-                            sindex = pack(regspace(1, 1, p%n), mask=(p%labels==unindex(ic)))
+                            sindex = pack(regspace(1, 1, p%n_points), mask=(p%labels==unindex(ic)))
 
                             ! Fit the surface
                             call fit_surface(p%data(sindex, 1), p%data(sindex, 2), p%data(sindex, 3), &
@@ -512,7 +511,7 @@ contains
                                     sp = ic
                                 end if
                             end do
-                            if (d <= ml_max_dist) then
+                            if (sqrt(d) <= ml_max_dist) then
                                 sxr(l, 1, 1) = fx(sp)
                                 syr(l, 1, 1) = fy(sp)
                                 szr(l, 1, 1) = fz(sp)

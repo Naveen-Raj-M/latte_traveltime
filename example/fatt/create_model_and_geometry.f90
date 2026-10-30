@@ -28,7 +28,7 @@ program test
     p%nl = 10
     p%lwv = 0.5
     p%disp = [10, 20]
-    p%secondary_refl_amp = 0.1
+    p%secondary_refl_height_ratio = 0.1
     p%yn_facies = .true.
     p%fwidth = 5
     p%seed = 1202

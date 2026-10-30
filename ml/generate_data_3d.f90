@@ -1,5 +1,5 @@
 !
-! © 2024. Triad National Security, LLC. All rights reserved.
+! © 2024-2026. Triad National Security, LLC. All rights reserved.
 !
 ! This program was produced under U.S. Government contract 89233218CNA000001 
 ! for Los Alamos National Laboratory (LANL), which is operated by 
@@ -86,12 +86,12 @@ program main
             p%ng = irand(range=[2, 4])
             p%refl_height = [0.0, height2(i)]
             p%lwv = lwv2(i)
-            p%secondary_refl_amp = 0.05
+            p%secondary_refl_height_ratio = 0.05
         else
             p%refl_shape = 'random'
             p%refl_height = [0.0, height(i)]
             p%lwv = lwv(i)
-            p%secondary_refl_amp = 0.15
+            p%secondary_refl_height_ratio = 0.15
         end if
 
         if (mod(irand(range=[1, nm]), 3) == 0) then
