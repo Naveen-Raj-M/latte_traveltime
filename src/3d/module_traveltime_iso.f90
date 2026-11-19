@@ -32,9 +32,6 @@ module traveltime_iso
     real, parameter :: huge_value = sqrt(float_huge)
 
     double precision, allocatable, dimension(:, :, :) :: t0, pdxt0, pdyt0, pdzt0, tt, lambda, adjsrc
-    logical, allocatable, dimension(:, :, :) :: unknown, recrflag
-    ! Whether adjsrc holds point sources of the adjoint-state equation
-    logical :: point_source = .false.
     ! Offsets of the local (per-shot) grid within the global grid: local node
     ! (i, j, k) is global node (i + ioff, j + joff, k + koff); the spherical
     ! geometry arrays of module spherical are indexed by global nodes
@@ -371,18 +368,39 @@ contains
 
     !
     !> Fast sweeping to solve the adjoint state equation
+    !>
+    !>     div(lambda grad T) = sum_r dt_r delta(x - x_r)
+    !>
+    !> in the conservative upwind form of the Cartesian LATTE (Leung and
+    !> Qian, 2006; equation A-9 of Taillandier et al., 2009), written as a
+    !> finite-volume balance of the cell of each node: the six face fluxes
+    !> times the face areas over the cell volume. For each axis, with the
+    !> traveltime gradients a+ = (T_+ - T_c)/h_+ and a- = (T_c - T_-)/h_- on
+    !> the two faces, the face weights w+ and w- (face area over cell
+    !> volume), pos(a) = (a + |a|)/2 and neg(a) = (a - |a|)/2,
+    !>
+    !>     lhs = sum over axes of ( w+ neg(a+) - w- pos(a-) )
+    !>     rhs = sum over axes of ( w- neg(a-) lambda_- - w+ pos(a+) lambda_+ )
+    !>     lambda_c = (rhs - s_c)/lhs
+    !>
+    !> where s_c is the point source density at the node. In Cartesian
+    !> coordinates every w is 1/h, which is the original scheme. Here h is the
+    !> arc length between the nodes and w the exact face area of the spherical
+    !> cell over its exact volume (module spherical). A face on the boundary
+    !> of the grid has a = 0, i.e., no flux, as in the Cartesian code.
     !
-    subroutine fast_sweep_adjoint(n1, n2, n3, n1d, n2d, n3d, d1, d2, d3, lambda)
+    subroutine fast_sweep_adjoint(n1, n2, n3, n1d, n2d, n3d, lambda)
 
         integer, intent(in) :: n1, n2, n3, n1d, n2d, n3d
-        double precision, intent(in) :: d1, d2, d3
         double precision, dimension(:, :, :), intent(inout) :: lambda
 
-        integer :: i, j, k
+        integer :: i, j, k, jg, kg
         double precision :: app, amp, apm, amm
         double precision :: bpp, bmp, bpm, bmm
         double precision :: cpp, cmp, cpm, cmm
         double precision :: ap, am, bp, bm, cp, cm
+        double precision :: wxp, wxm, wyp, wym, wzp, wzm
+        double precision :: hx, hym, hyp, hz
         double precision :: lhs, rhs, t
         integer :: n1beg, n1end, n2beg, n2end, n3beg, n3end
         integer :: i1, i2, j1, j2, k1, k2
@@ -412,6 +430,8 @@ contains
             n3end = 1
         end if
 
+        hz = sph_ddepth
+
         ! In 3D, the maximum level is n3 + (n2 - 1) + (n1 - 1)
         do level = 1, n1 + n2 + n3 - 2
 
@@ -421,11 +441,12 @@ contains
             jbeg = ifelse(level <= n1 + n3 - 1, n2beg, n2beg + (level - (n1 + n3 - 1))*n2d)
             jend = ifelse(level <= n2, n2beg + (level - 1)*n2d, n2end)
 
-            !$omp parallel do private(i, j, k, i1, i2, j1, j2, k1, k2, &
+            !$omp parallel do private(i, j, k, jg, kg, i1, i2, j1, j2, k1, k2, &
                 !$omp app, amp, apm, amm, &
                 !$omp bpp, bmp, bpm, bmm, &
                 !$omp cpp, cmp, cpm, cmm, &
                 !$omp ap, am, bp, bm, cp, cm, &
+                !$omp wxp, wxm, wyp, wym, wzp, wzm, hx, hym, hyp, &
                 !$omp lhs, rhs, t) collapse(2)
             do k = kbeg, kend, n3d
                 do j = jbeg, jend, n2d
@@ -440,85 +461,104 @@ contains
                         cycle
                     end if
 
-                    if (.not. recrflag(i, j, k)) then
-
-                        if (i == 1) then
-                            i1 = i
-                        else
-                            i1 = i - 1
-                        end if
-                        if (i == n1) then
-                            i2 = i
-                        else
-                            i2 = i + 1
-                        end if
-
-                        if (j == 1) then
-                            j1 = j
-                        else
-                            j1 = j - 1
-                        end if
-                        if (j == n2) then
-                            j2 = j
-                        else
-                            j2 = j + 1
-                        end if
-
-                        if (k == 1) then
-                            k1 = k
-                        else
-                            k1 = k - 1
-                        end if
-                        if (k == n3) then
-                            k2 = k
-                        else
-                            k2 = k + 1
-                        end if
-
-                        ! Solve equation (A-9) in Taillander et al (2009)
-                        ap = (tt(i2, j, k) - tt(i, j, k))/d1
-                        am = (tt(i, j, k) - tt(i1, j, k))/d1
-
-                        bp = (tt(i, j2, k) - tt(i, j, k))/d2
-                        bm = (tt(i, j, k) - tt(i, j1, k))/d2
-
-                        cp = (tt(i, j, k2) - tt(i, j, k))/d3
-                        cm = (tt(i, j, k) - tt(i, j, k1))/d3
-
-                        app = (ap + abs(ap))/2.0
-                        apm = (ap - abs(ap))/2.0
-
-                        amp = (am + abs(am))/2.0
-                        amm = (am - abs(am))/2.0
-
-                        bpp = (bp + abs(bp))/2.0
-                        bpm = (bp - abs(bp))/2.0
-
-                        bmp = (bm + abs(bm))/2.0
-                        bmm = (bm - abs(bm))/2.0
-
-                        cpp = (cp + abs(cp))/2.0
-                        cpm = (cp - abs(cp))/2.0
-
-                        cmp = (cm + abs(cm))/2.0
-                        cmm = (cm - abs(cm))/2.0
-
-                        lhs = (apm - amp)/d1 + (bpm - bmp)/d2 + (cpm - cmp)/d3
-                        rhs = (amm*lambda(i1, j, k) - app*lambda(i2, j, k))/d1 &
-                            + (bmm*lambda(i, j1, k) - bpp*lambda(i, j2, k))/d2 &
-                            + (cmm*lambda(i, j, k1) - cpp*lambda(i, j, k2))/d3
-
-                        if (lhs == 0) then
-                            t = 0
-                        else if (point_source) then
-                            t = (rhs - adjsrc(i, j, k))/lhs
-                        else
-                            t = rhs/lhs
-                        end if
-
-                        lambda(i, j, k) = min(lambda(i, j, k), t)
-
+                    if (i == 1) then
+                        i1 = i
+                    else
+                        i1 = i - 1
                     end if
+                    if (i == n1) then
+                        i2 = i
+                    else
+                        i2 = i + 1
+                    end if
+
+                    if (j == 1) then
+                        j1 = j
+                    else
+                        j1 = j - 1
+                    end if
+                    if (j == n2) then
+                        j2 = j
+                    else
+                        j2 = j + 1
+                    end if
+
+                    if (k == 1) then
+                        k1 = k
+                    else
+                        k1 = k - 1
+                    end if
+                    if (k == n3) then
+                        k2 = k
+                    else
+                        k2 = k + 1
+                    end if
+
+                    ! Global indices of the node for the spherical geometry
+                    jg = j + joff
+                    kg = k + koff
+
+                    ! Arc lengths between the node and its neighbours; on a
+                    ! boundary face the difference below is zero, and the
+                    ! arc length there only needs to be nonzero
+                    hx = arc_lon(jg, kg)
+                    hym = 1.0d0
+                    hyp = 1.0d0
+                    if (j > 1) then
+                        hym = arc_lat(jg - 1, jg, kg)
+                    end if
+                    if (j < n2) then
+                        hyp = arc_lat(jg, jg + 1, kg)
+                    end if
+
+                    ! Face areas over the cell volume
+                    wxm = face_weight_lon(jg, kg)
+                    wxp = wxm
+                    wym = face_weight_lat(jg, jg, kg)
+                    wyp = face_weight_lat(jg + 1, jg, kg)
+                    wzm = face_weight_radial(kg, jg, kg)
+                    wzp = face_weight_radial(kg + 1, jg, kg)
+
+                    ! Traveltime gradients on the faces: east, north, down
+                    ap = (tt(i2, j, k) - tt(i, j, k))/hx
+                    am = (tt(i, j, k) - tt(i1, j, k))/hx
+
+                    bp = (tt(i, j2, k) - tt(i, j, k))/hyp
+                    bm = (tt(i, j, k) - tt(i, j1, k))/hym
+
+                    cp = (tt(i, j, k2) - tt(i, j, k))/hz
+                    cm = (tt(i, j, k) - tt(i, j, k1))/hz
+
+                    app = (ap + abs(ap))/2.0
+                    apm = (ap - abs(ap))/2.0
+
+                    amp = (am + abs(am))/2.0
+                    amm = (am - abs(am))/2.0
+
+                    bpp = (bp + abs(bp))/2.0
+                    bpm = (bp - abs(bp))/2.0
+
+                    bmp = (bm + abs(bm))/2.0
+                    bmm = (bm - abs(bm))/2.0
+
+                    cpp = (cp + abs(cp))/2.0
+                    cpm = (cp - abs(cp))/2.0
+
+                    cmp = (cm + abs(cm))/2.0
+                    cmm = (cm - abs(cm))/2.0
+
+                    lhs = (wxp*apm - wxm*amp) + (wyp*bpm - wym*bmp) + (wzp*cpm - wzm*cmp)
+                    rhs = (wxm*amm*lambda(i1, j, k) - wxp*app*lambda(i2, j, k)) &
+                        + (wym*bmm*lambda(i, j1, k) - wyp*bpp*lambda(i, j2, k)) &
+                        + (wzm*cmm*lambda(i, j, k1) - wzp*cpp*lambda(i, j, k2))
+
+                    if (lhs == 0) then
+                        t = 0
+                    else
+                        t = (rhs - adjsrc(i, j, k))/lhs
+                    end if
+
+                    lambda(i, j, k) = min(lambda(i, j, k), t)
 
                 end do
             end do
@@ -1095,37 +1135,33 @@ contains
     end subroutine forward_iso
 
     !
-    !> Compute adjoint field for FATT
+    !> Compute the adjoint-state field of a shot, for FATT and TLOC
     !>
-    !> receiver selects how the traveltime residuals at the receivers, dt_r
-    !> in tresidual, enter the adjoint-state equation:
+    !> The traveltime residuals at the receivers, dt_r in tresidual, enter
+    !> the adjoint-state equation as true point sources,
     !>
-    !> nearest (the default without receiver): a Dirichlet boundary
-    !> condition. The adjoint field at the grid point nearest to a receiver
-    !> is fixed to the traveltime residual there, and -div(lambda grad T) = 0
-    !> elsewhere.
+    !>     -div(lambda grad T) = sum_r dt_r delta(x - x_r),
     !>
-    !> linear: true adjoint sources, -div(lambda grad T) = sum_r dt_r
-    !> delta(x - x_r). The source of a receiver goes to the eight corners of
-    !> the receiver's grid cell with the trilinear weights by which forward_iso
-    !> interpolates the receiver traveltime, i.e., the transpose of that
-    !> interpolation, divided by the cell volume. No grid point is fixed, so
-    !> the sources of nearby receivers add up, and the field of a receiver
-    !> passes through the grid points of the others.
+    !> the linear injection of the Cartesian LATTE: the source of a receiver
+    !> goes to the eight corners of the receiver's grid cell with the
+    !> trilinear weights by which forward_iso interpolates the receiver
+    !> traveltime, i.e., the transpose of that interpolation, divided by the
+    !> exact spherical cell volume of each corner node. No grid point is
+    !> fixed, so the sources of nearby receivers add up. The spherical branch
+    !> supports only this injection.
     !
-    subroutine adjoint_iso(v, d, o, geom, t, tresidual, tadj, receiver)
+    subroutine adjoint_iso(v, d, o, geom, t, tresidual, tadj)
 
         real, dimension(:, :, :), intent(in) :: v, t
         real, dimension(1:3), intent(in) :: d, o
         type(source_receiver_geometry), intent(in) :: geom
         real, dimension(:, :), intent(in) :: tresidual
         real, dimension(:, :, :), allocatable, intent(out) :: tadj
-        character(len=*), intent(in), optional :: receiver
 
         double precision, allocatable, dimension(:, :, :) :: vp, lambda_prev
-        integer :: nx, ny, nz, iter, i, irx, iry, irz, a, b, c !, j, k
+        integer :: nx, ny, nz, iter, i, a, b, c
         integer, dimension(1:2) :: ii, jj, kk
-        double precision :: lambda_diff, dx, dy, dz, ox, oy, oz, r
+        double precision :: lambda_diff, dx, dy, dz, ox, oy, oz
         double precision, dimension(1:2) :: wx, wy, wz
 
         dx = d(1)
@@ -1141,76 +1177,37 @@ contains
         ny = size(tt, 2)
         nz = size(tt, 3)
 
-        point_source = .false.
-        if (present(receiver)) then
-            point_source = receiver == 'linear'
-        end if
+        ! Position of this (per-shot) grid within the global grid, for the
+        ! spherical geometry arrays
+        call set_grid_offsets(o, nx, ny, nz)
 
-        recrflag = falses(nx, ny, nz)
-        lambda = zeros(nx, ny, nz)
         lambda_prev = zeros(nx, ny, nz)
         lambda_diff = huge_value
 
-        if (point_source) then
-
-            ! The point sources of the receivers inside the medium, the same
-            ! receivers as in forward_iso; serial because receivers may share
-            ! grid points
-            adjsrc = zeros(nx, ny, nz)
-            do i = 1, geom%nr
-                if (geom%recr(i)%weight /= 0) then
-                    if (point_in_domain(dble([geom%recr(i)%x, geom%recr(i)%y, geom%recr(i)%z]), &
-                            [nx, ny, nz], [ox, oy, oz], [dx, dy, dz], vp)) then
-                        call linear_weights((geom%recr(i)%x - ox)/dx, nx, ii, wx)
-                        call linear_weights((geom%recr(i)%y - oy)/dy, ny, jj, wy)
-                        call linear_weights((geom%recr(i)%z - oz)/dz, nz, kk, wz)
-                        r = tresidual(i, 1)/(dx*dy*dz)
-                        do c = 1, 2
-                            do b = 1, 2
-                                do a = 1, 2
-                                    adjsrc(ii(a), jj(b), kk(c)) = adjsrc(ii(a), jj(b), kk(c)) + r*wx(a)*wy(b)*wz(c)
-                                end do
+        ! The point sources of the receivers inside the medium, the same
+        ! receivers as in forward_iso; serial because receivers may share
+        ! grid points
+        adjsrc = zeros(nx, ny, nz)
+        do i = 1, geom%nr
+            if (geom%recr(i)%weight /= 0) then
+                if (point_in_domain(dble([geom%recr(i)%x, geom%recr(i)%y, geom%recr(i)%z]), &
+                        [nx, ny, nz], [ox, oy, oz], [dx, dy, dz], vp)) then
+                    call linear_weights((geom%recr(i)%x - ox)/dx, nx, ii, wx)
+                    call linear_weights((geom%recr(i)%y - oy)/dy, ny, jj, wy)
+                    call linear_weights((geom%recr(i)%z - oz)/dz, nz, kk, wz)
+                    do c = 1, 2
+                        do b = 1, 2
+                            do a = 1, 2
+                                adjsrc(ii(a), jj(b), kk(c)) = adjsrc(ii(a), jj(b), kk(c)) &
+                                    + tresidual(i, 1)*wx(a)*wy(b)*wz(c) &
+                                    /cell_volume(jj(b) + joff, kk(c) + koff)
                             end do
                         end do
-                    end if
+                    end do
                 end if
-            end do
-            lambda = huge_value
-
-        else
-
-            ! Get the misfit values at the receivers
-            do i = 1, geom%nr
-                if (geom%recr(i)%weight /= 0) then
-                    irx = nint((geom%recr(i)%x - ox)/dx) + 1
-                    iry = nint((geom%recr(i)%y - oy)/dy) + 1
-                    irz = nint((geom%recr(i)%z - oz)/dz) + 1
-                    lambda(irx, iry, irz) = lambda(irx, iry, irz) + tresidual(i, 1)
-                    recrflag(irx, iry, irz) = .true.
-                end if
-            end do
-            where (.not. recrflag)
-                lambda = huge_value
-            end where
-
-        end if
-
-        !        ! This is to set lambda = 0 on boundaries, but does not make a difference
-        !        ! when both source and receivers are inside and could be ignored.
-        !        ! But when this is set, the preconditioner input residual must be negative to
-        !        ! avoid unwanted boundary artifacts.
-        !        !$omp parallel do private(i, j, k)
-        !        do k = 1, nz
-        !            do j = 1, ny
-        !                do i = 1, nx
-        !                    if ((i == 1 .or. i == nx .or. j == 1 .or. j == ny &
-            !                        .or. k == 1 .or. k == nz) .and. (.not.recrflag(i, j, k))) then
-        !                        lambda(i, j, k) = 0.0
-        !                    end if
-        !                end do
-        !            end do
-        !        end do
-        !        !$omp end parallel do
+            end if
+        end do
+        lambda = zeros(nx, ny, nz) + huge_value
 
         ! Fast sweep to solve the adjoint-state equation
         iter = 0
@@ -1221,14 +1218,14 @@ contains
             lambda_prev = lambda
 
             ! Fast sweeps
-            call fast_sweep_adjoint(nx, ny, nz, 1, 1, 1, dx, dy, dz, lambda)
-            call fast_sweep_adjoint(nx, ny, nz, 1, 1, -1, dx, dy, dz, lambda)
-            call fast_sweep_adjoint(nx, ny, nz, 1, -1, 1, dx, dy, dz, lambda)
-            call fast_sweep_adjoint(nx, ny, nz, 1, -1, -1, dx, dy, dz, lambda)
-            call fast_sweep_adjoint(nx, ny, nz, -1, 1, 1, dx, dy, dz, lambda)
-            call fast_sweep_adjoint(nx, ny, nz, -1, 1, -1, dx, dy, dz, lambda)
-            call fast_sweep_adjoint(nx, ny, nz, -1, -1, 1, dx, dy, dz, lambda)
-            call fast_sweep_adjoint(nx, ny, nz, -1, -1, -1, dx, dy, dz, lambda)
+            call fast_sweep_adjoint(nx, ny, nz, 1, 1, 1, lambda)
+            call fast_sweep_adjoint(nx, ny, nz, 1, 1, -1, lambda)
+            call fast_sweep_adjoint(nx, ny, nz, 1, -1, 1, lambda)
+            call fast_sweep_adjoint(nx, ny, nz, 1, -1, -1, lambda)
+            call fast_sweep_adjoint(nx, ny, nz, -1, 1, 1, lambda)
+            call fast_sweep_adjoint(nx, ny, nz, -1, 1, -1, lambda)
+            call fast_sweep_adjoint(nx, ny, nz, -1, -1, 1, lambda)
+            call fast_sweep_adjoint(nx, ny, nz, -1, -1, -1, lambda)
 
             ! Check threshold
             lambda_diff = mean(abs(lambda - lambda_prev))

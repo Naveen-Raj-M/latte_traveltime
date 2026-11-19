@@ -36,3 +36,10 @@ $python "$here/step2/test_gradient.py" --bin "$bindir"
 
 echo "################ Step 2: velocity depending on depth ################"
 $python "$here/step2/test_radial.py" --bin "$bindir"
+
+echo "################ Step 3: finite-difference check of the adjoint gradient ################"
+bash "$here/step3/run_gradient_fd.sh" "$objdir"
+
+echo "################ Step 3: end-to-end FATT and TLOC ################"
+PYTHON=$python bash "$here/step3/run_fatt.sh" "$bindir"
+PYTHON=$python bash "$here/step3/run_tloc.sh" "$bindir"

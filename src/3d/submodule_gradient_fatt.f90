@@ -31,7 +31,7 @@ contains
         real, allocatable, dimension(:, :, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
         real, allocatable, dimension(:, :) :: tts_syn, tts_obs, tts_residual
-        real, allocatable, dimension(:, :, :) :: lam, energy
+        real, allocatable, dimension(:, :, :) :: lam, energy, vrel
         integer :: i
         real, allocatable, dimension(:, :, :) :: vp, vs
         character(len=1024) :: dir_field
@@ -80,6 +80,11 @@ contains
         do ishot = shot_in_rank(rankid, 1), shot_in_rank(rankid, 2)
 
             call set_adaptive_model_range(gmtr(ishot))
+
+
+            ! Relative cell volumes of the shot range, the weights of the gradient
+
+            vrel = relative_volume_array(shot_nybeg, shot_nyend, shot_nzbeg, shot_nzend, shot_nx)
 
             select case (which_medium)
 
@@ -158,7 +163,7 @@ contains
                     call adjoint_iso( &
                         vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                         [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
-                        ttp_residual, lam, adjoint_receiver)
+                        ttp_residual, lam)
 
                     if (yn_precond) then
 
@@ -166,14 +171,14 @@ contains
                         call adjoint_iso( &
                             vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                             [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
-                            -ones_like(ttp_residual), energy, adjoint_receiver)
-                        energy = -energy
+                            -ones_like(ttp_residual), energy)
+                        energy = -energy*vrel
 
-                        lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                        lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                     else
 
-                        lam = -lam/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                        lam = -lam*vrel/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                     end if
 
@@ -192,7 +197,7 @@ contains
                     call adjoint_iso( &
                         vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                         [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
-                        ttp_residual, lam, adjoint_receiver)
+                        ttp_residual, lam)
 
                     if (yn_precond) then
 
@@ -200,14 +205,14 @@ contains
                         call adjoint_iso( &
                             vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                             [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
-                            -ones_like(ttp_residual), energy, adjoint_receiver)
-                        energy = -energy
+                            -ones_like(ttp_residual), energy)
+                        energy = -energy*vrel
 
-                        lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                        lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                     else
 
-                        lam = -lam/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                        lam = -lam*vrel/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                     end if
 
@@ -225,7 +230,7 @@ contains
                     call adjoint_iso( &
                         vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                         [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, &
-                        tts_residual, lam, adjoint_receiver)
+                        tts_residual, lam)
 
                     if (yn_precond) then
 
@@ -233,14 +238,14 @@ contains
                         call adjoint_iso( &
                             vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                             [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, &
-                            -ones_like(tts_residual), energy, adjoint_receiver)
-                        energy = -energy
+                            -ones_like(tts_residual), energy)
+                        energy = -energy*vrel
 
-                        lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                        lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                     else
 
-                        lam = -lam/vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                        lam = -lam*vrel/vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                     end if
 

@@ -31,7 +31,7 @@ contains
         real, allocatable, dimension(:, :, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
         real, allocatable, dimension(:, :) :: tts_syn, tts_obs, tts_residual
-        real, allocatable, dimension(:, :, :) :: lam, energy
+        real, allocatable, dimension(:, :, :) :: lam, energy, vrel
         integer :: i, j, irx, iry, irz
         real :: dxt, dyt, dzt
         real, allocatable, dimension(:, :, :) :: vp, vs, sx, sy, sz, st0
@@ -135,6 +135,9 @@ contains
             ! Set adaptive range
             call set_adaptive_model_range(gmtr(ishot))
 
+            ! Relative cell volumes of the shot range, the weights of the gradient
+            vrel = relative_volume_array(shot_nybeg, shot_nyend, shot_nzbeg, shot_nzend, shot_nx)
+
             select case (which_medium)
 
                 case ('acoustic-iso')
@@ -226,7 +229,7 @@ contains
                                     vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
                                     -ones_like(ttp_residual), energy)
-                                energy = -energy
+                                energy = -energy*vrel
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
@@ -237,11 +240,11 @@ contains
                                         abs(energy)
                                 end if
 
-                                lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                                lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                             else
 
-                                lam = -lam/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                                lam = -lam*vrel/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                             end if
 
@@ -328,7 +331,7 @@ contains
                                     vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
                                     -ones_like(ttp_residual), energy)
-                                energy = -energy
+                                energy = -energy*vrel
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
@@ -339,11 +342,11 @@ contains
                                         abs(energy)
                                 end if
 
-                                lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                                lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                             else
 
-                                lam = -lam/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                                lam = -lam*vrel/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                             end if
 
@@ -369,7 +372,7 @@ contains
                                     vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, &
                                     -ones_like(tts_residual), energy)
-                                energy = -energy
+                                energy = -energy*vrel
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
@@ -380,11 +383,11 @@ contains
                                         abs(energy)
                                 end if
 
-                                lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                                lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                             else
 
-                                lam = -lam/vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                                lam = -lam*vrel/vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                             end if
 
@@ -500,7 +503,7 @@ contains
         real, allocatable, dimension(:, :, :) :: ttp, tts
         real, allocatable, dimension(:, :) :: ttp_syn, ttp_obs, ttp_residual
         real, allocatable, dimension(:, :) :: tts_syn, tts_obs, tts_residual
-        real, allocatable, dimension(:, :, :) :: lam, energy
+        real, allocatable, dimension(:, :, :) :: lam, energy, vrel
         integer :: i, j, irx, iry, irz
         real :: dxt, dyt, dzt
         real, allocatable, dimension(:, :, :) :: vp, vs, sx, sy, sz, st0
@@ -615,6 +618,9 @@ contains
 
             ! Set adaptive range
             call set_adaptive_model_range(gmtr(ishot))
+
+            ! Relative cell volumes of the shot range, the weights of the gradient
+            vrel = relative_volume_array(shot_nybeg, shot_nyend, shot_nzbeg, shot_nzend, shot_nx)
 
             select case (which_medium)
 
@@ -731,6 +737,9 @@ contains
             ! Set adaptive range
             call set_adaptive_model_range(gmtr(ishot))
 
+            ! Relative cell volumes of the shot range, the weights of the gradient
+            vrel = relative_volume_array(shot_nybeg, shot_nyend, shot_nzbeg, shot_nzend, shot_nx)
+
             step_misfit(ishot) = 0
             select case (which_medium)
                 case ('acoustic-iso', 'acoustic-tti')
@@ -772,7 +781,7 @@ contains
                                     vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
                                     -ones_like(ttp_residual), energy)
-                                energy = -energy
+                                energy = -energy*vrel
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
@@ -783,11 +792,11 @@ contains
                                         abs(energy)
                                 end if
 
-                                lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                                lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                             else
 
-                                lam = -lam/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                                lam = -lam*vrel/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                             end if
 
@@ -877,7 +886,7 @@ contains
                                     vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), ttp, &
                                     -ones_like(ttp_residual), energy)
-                                energy = -energy
+                                energy = -energy*vrel
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
@@ -888,11 +897,11 @@ contains
                                         abs(energy)
                                 end if
 
-                                lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                                lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                             else
 
-                                lam = -lam/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                                lam = -lam*vrel/vp(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                             end if
 
@@ -918,7 +927,7 @@ contains
                                     vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend), &
                                     [dx, dy, dz], [shot_xbeg, shot_ybeg, shot_zbeg], gmtr(ishot), tts, &
                                     -ones_like(tts_residual), energy)
-                                energy = -energy
+                                energy = -energy*vrel
 
                                 ! Accumulate energy into DWS if requested
                                 if (yn_output_dws) then
@@ -929,11 +938,11 @@ contains
                                         abs(energy)
                                 end if
 
-                                lam = -lam/(energy + precond_eps*maxval(abs(energy)))
+                                lam = -lam*vrel/(energy + precond_eps*maxval(abs(energy)))
 
                             else
 
-                                lam = -lam/vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
+                                lam = -lam*vrel/vs(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend)**3
 
                             end if
 

@@ -1,0 +1,13 @@
+nlon = 61
+nlat = 61
+ndepth = 21
+dlon = 0.05
+dlat = 0.05
+ddepth = 2000
+olon = 100
+olat = 20
+ns = 9
+file_geometry = geometry/geometry.txt
+model_name = vp
+file_vp = model/vp_true.bin
+dir_synthetic = data

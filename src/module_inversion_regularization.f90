@@ -115,9 +115,12 @@ contains
         character(len=64) :: process_name
         character(len=32), allocatable, dimension(:) :: process_list
 
-        ! Difference between the model and its regularized version; reg keeps
-        ! the regularized version, which only compute_regularization updates
-        r = model - reg
+        ! Difference between the model and its regularized version, weighted
+        ! by the relative cell volume: the gradient of the volume integral of
+        ! the squared difference, consistent with the volume-weighted data
+        ! gradient. reg keeps the regularized version, which only
+        ! compute_regularization updates
+        r = (model - reg)*relative_volume_array(1, ny, 1, nz, nx)
 
         ! regularization scale
         call readpar_xlogical(file_parameter, 'const_reg', const_reg, .false., iter*1.0)

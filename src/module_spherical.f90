@@ -75,6 +75,8 @@ module spherical
     !> depth odepth + (k - 1.5)*ddepth, so level k owns the cell between faces
     !> k (shallower) and k + 1 (deeper)
     double precision, allocatable, dimension(:) :: sph_r_face
+    !> Mean cell volume of the global grid, the unit of relative cell volumes
+    double precision :: sph_vmean = 1.0d0
 
     private :: sph_check
 
@@ -171,6 +173,87 @@ contains
     end function cell_volume
 
     !
+    !> Relative volume of the cell of global node (i, j, k): its volume over
+    !> the mean cell volume of the grid
+    !
+    pure function relative_volume(j, k) result(v)
+
+        integer, intent(in) :: j, k
+        double precision :: v
+
+        v = cell_volume(j, k)/sph_vmean
+
+    end function relative_volume
+
+    !
+    !> Relative cell volumes of a block of the global grid, rows jbeg to jend
+    !> and levels kbeg to kend, with ni columns, in the model order (depth,
+    !> latitude, longitude)
+    !
+    function relative_volume_array(jbeg, jend, kbeg, kend, ni) result(v)
+
+        integer, intent(in) :: jbeg, jend, kbeg, kend, ni
+        real, allocatable, dimension(:, :, :) :: v
+        integer :: j, k
+
+        allocate (v(1:kend - kbeg + 1, 1:jend - jbeg + 1, 1:ni))
+        do j = jbeg, jend
+            do k = kbeg, kend
+                v(k - kbeg + 1, j - jbeg + 1, :) = real(relative_volume(j, k))
+            end do
+        end do
+
+    end function relative_volume_array
+
+    !
+    !> Area of a face of constant longitude of the cell of global node
+    !> (i, j, k), over the cell volume:
+    !>     (r_k-1/2^2 - r_k+1/2^2)/2 * (theta_j+1/2 - theta_j-1/2) / V
+    !> Both longitude faces of a cell have this area.
+    !
+    pure function face_weight_lon(j, k) result(w)
+
+        integer, intent(in) :: j, k
+        double precision :: w
+
+        w = 0.5d0*(sph_r_face(k)**2 - sph_r_face(k + 1)**2) &
+            *(sph_lat_face(j + 1) - sph_lat_face(j))/cell_volume(j, k)
+
+    end function face_weight_lon
+
+    !
+    !> Area of the face of constant latitude jf (jf = j for the southern face,
+    !> j + 1 for the northern face) of the cell of global node (i, j, k), over
+    !> the cell volume:
+    !>     (r_k-1/2^2 - r_k+1/2^2)/2 * cos(theta_jf) * dlambda / V
+    !
+    pure function face_weight_lat(jf, j, k) result(w)
+
+        integer, intent(in) :: jf, j, k
+        double precision :: w
+
+        w = 0.5d0*(sph_r_face(k)**2 - sph_r_face(k + 1)**2) &
+            *sph_coslat_face(jf)*sph_dlon_rad/cell_volume(j, k)
+
+    end function face_weight_lat
+
+    !
+    !> Area of the face of constant radius kf (kf = k for the shallower face,
+    !> k + 1 for the deeper face) of the cell of global node (i, j, k), over
+    !> the cell volume:
+    !>     r_kf^2 * (sin(theta_j+1/2) - sin(theta_j-1/2)) * dlambda / V
+    !
+    pure function face_weight_radial(kf, j, k) result(w)
+
+        integer, intent(in) :: kf, j, k
+        double precision :: w
+
+        w = sph_r_face(kf)**2*(sph_sinlat_face(j + 1) - sph_sinlat_face(j)) &
+            *sph_dlon_rad/cell_volume(j, k)
+
+    end function face_weight_radial
+
+    !
     !> Arc length between neighbouring nodes along a parallel, at row j and
     !> level k: r_k cos(theta_j) dlambda
     !
@@ -261,6 +344,16 @@ contains
         do k = 1, ndepth + 1
             sph_r_face(k) = earth_radius - (odepth + (k - 1.5d0)*ddepth)
         end do
+
+        ! Mean cell volume of the grid; the cell volume does not depend on
+        ! the longitude index
+        sph_vmean = 0.0d0
+        do k = 1, ndepth
+            do j = 1, nlat
+                sph_vmean = sph_vmean + cell_volume(j, k)
+            end do
+        end do
+        sph_vmean = sph_vmean/(dble(nlat)*dble(ndepth))
 
     end subroutine init_spherical_grid
 

@@ -143,7 +143,7 @@ module parameters
     logical :: verbose
     integer :: sweep_niter_max = 10
     real :: sweep_stop_threshold = 1.0e-4
-    character(len=12) :: adjoint_receiver = 'nearest'
+    character(len=12) :: adjoint_receiver = 'linear'
     real :: misfit_threshold
 
 
@@ -381,11 +381,12 @@ contains
         call readpar_logical(file_parameter, 'verbose', verbose, .false.)
         call readpar_float(file_parameter, 'sweep_stop_threshold', sweep_stop_threshold, 1.0e-4)
         call readpar_int(file_parameter, 'sweep_niter_max', sweep_niter_max, 10)
-        ! How FATT injects the traveltime residuals at the receivers into the
-        ! adjoint-state equation; TRTT and TLOC always use nearest
-        call readpar_string(file_parameter, 'adjoint_receiver', adjoint_receiver, 'nearest')
-        call assert(any_in([adjoint_receiver], ['nearest', 'linear']), &
-            ' <read_parameters> Error: adjoint_receiver must be one of nearest, linear')
+        ! How the traveltime residuals at the receivers enter the adjoint-state
+        ! equation; the spherical branch supports only linear injection, for
+        ! FATT and TLOC
+        call readpar_string(file_parameter, 'adjoint_receiver', adjoint_receiver, 'linear')
+        call assert(adjoint_receiver == 'linear', &
+            ' <read_parameters> Error: the spherical branch supports only adjoint_receiver = linear')
 
         call readpar_string(file_parameter, 'file_data_misfit', file_datamisfit, tidy(dir_working)//'/data_misfit.txt')
         call readpar_string(file_parameter, 'file_shot_misfit', file_shotmisfit, tidy(dir_working)//'/shot_misfit.bin')
