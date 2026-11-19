@@ -50,3 +50,6 @@ bash "$here/step4/run_filters.sh" "$objdir"
 echo "################ Step 4: cone mute and FATT with processing ################"
 PYTHON=$python bash "$here/step4/run_conemute.sh" "$bindir"
 PYTHON=$python bash "$here/step4/run_fatt_processing.sh" "$bindir"
+
+echo "################ Step 5: TLOC relocation at 60 degrees latitude ################"
+PYTHON=$python bash "$here/step5/run_relocation.sh" "$bindir"

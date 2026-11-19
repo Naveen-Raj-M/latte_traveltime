@@ -146,11 +146,78 @@ contains
         step_suitable = .true.
 
         do i = 1, nmodel
-            call check_step_range_single_model(model_step(i), &
-                s, model_srch(i)%array, model_step_max(i))
+            if (any(model_name(i) == ['slon', 'slat']) .and. model_step_max(i) /= 0) then
+                ! Event longitudes and latitudes are in degrees, their step
+                ! limits in meters: the largest exact move of an event
+                step_suitable = step_suitable .and. &
+                    largest_event_move(i, model_step(i)*s) < model_step_max(i)
+            else
+                call check_step_range_single_model(model_step(i), &
+                    s, model_srch(i)%array, model_step_max(i))
+            end if
         end do
 
     end subroutine check_step_range
+
+    !
+    !> Current longitude, geodetic latitude and depth of the events (the
+    !> virtual receivers of TLOC): from the models being updated, or else from
+    !> the geometry
+    !
+    subroutine current_event_positions(elon, elat, edep)
+
+        double precision, allocatable, dimension(:), intent(out) :: elon, elat, edep
+        integer :: i
+
+        elon = dble(gmtr(1)%recr(:)%x)
+        elat = dble(gmtr(1)%recr(:)%y)
+        edep = dble(gmtr(1)%recr(:)%z)
+        do i = 1, nmodel
+            select case (model_name(i))
+                case ('slon')
+                    elon = dble(model_m(i)%array(:, 1, 1))
+                case ('slat')
+                    elat = dble(model_m(i)%array(:, 1, 1))
+                case ('sdepth')
+                    edep = dble(model_m(i)%array(:, 1, 1))
+            end select
+        end do
+
+    end subroutine current_event_positions
+
+    !
+    !> The largest distance, in meters, that any event moves when its
+    !> longitude (model i is slon) or geodetic latitude (model i is slat)
+    !> changes by step*srch degrees: for an event at radius r = R - depth and
+    !> geocentric latitude theta, the exact arc
+    !>
+    !>     longitude:  r cos(theta) |dlon| pi/180            (along its parallel)
+    !>     latitude:   r |theta(lat + dlat) - theta(lat)|    (along its meridian)
+    !
+    function largest_event_move(i, step) result(dmax)
+
+        integer, intent(in) :: i
+        real, intent(in) :: step
+        real :: dmax
+
+        double precision, allocatable, dimension(:) :: elon, elat, edep, delta
+        double precision :: r
+        integer :: e
+
+        call current_event_positions(elon, elat, edep)
+        delta = dble(step)*dble(model_srch(i)%array(:, 1, 1))
+        dmax = 0.0
+        do e = 1, size(delta)
+            r = earth_radius - edep(e)
+            if (model_name(i) == 'slon') then
+                dmax = max(dmax, real(r*cos(geodetic_to_geocentric(elat(e)))*abs(delta(e))*deg2rad))
+            else
+                dmax = max(dmax, real(r*abs(geodetic_to_geocentric(elat(e) + delta(e)) &
+                    - geodetic_to_geocentric(elat(e)))))
+            end if
+        end do
+
+    end function largest_event_move
 
     !
     !> Backup current model
@@ -215,6 +282,10 @@ contains
 
         do i = 1, nmodel
             call min_max_step_size(model_step(i), model_srch(i)%array, step_scaling_factor, model_name(i))
+            if (any(model_name(i) == ['slon', 'slat']) .and. rankid == 0) then
+                call warn(date_time_compact()//' Largest event move by '//tidy(model_name(i))//' = ' &
+                    //num2str(largest_event_move(i, model_step(i)*step_scaling_factor), '(es12.4)')//' m')
+            end if
         end do
 
     end subroutine print_perturb_info
@@ -241,9 +312,13 @@ contains
                 case ('c', 'C')
                     valstep = 1.0e9
                 case ('slon')
-                    valstep = 0.1*(nx - 1)*dx
+                    ! Meters: a tenth of the east-west extent of the grid at
+                    ! the reference cell size
+                    valstep = real(0.1*(nx - 1)*reference_spacing_lon())
                 case ('slat')
-                    valstep = 0.1*(ny - 1)*dy
+                    ! Meters: a tenth of the north-south extent at the
+                    ! reference cell size
+                    valstep = real(0.1*(ny - 1)*reference_spacing_lat())
                 case ('sdepth')
                     valstep = 0.1*(nz - 1)*dz
                 case ('st0')
@@ -253,11 +328,66 @@ contains
             call readpar_xfloat(file_parameter, 'step_max_'//tidy(model_name(i)), model_step_max(i), valstep, iter*1.0)
             ! In most cases, step_max_scale_factor = 1
             model_step_max(i) = model_step_max(i)*step_max_scale_factor
-            call initial_step_size(model_m(i)%array, model_srch(i)%array, model_step(i), model_step_max(i))
+            if (any(model_name(i) == ['slon', 'slat'])) then
+                call initial_event_step_size(i, model_step(i), model_step_max(i))
+            else
+                call initial_step_size(model_m(i)%array, model_srch(i)%array, model_step(i), model_step_max(i))
+            end if
 
         end do
 
     end subroutine compute_initial_step_size
+
+    !
+    !> Initial step of event longitudes or latitudes (model i), in degrees per
+    !> unit search direction, so that the event with the largest move moves
+    !> by about step_max meters: step_max over the largest |srch| times the
+    !> local length of a degree at each event, r cos(theta) pi/180 for
+    !> longitude and r (dtheta/dlat) pi/180 for latitude. The exact moves are
+    !> checked in check_step_range.
+    !
+    subroutine initial_event_step_size(i, init_step, step_max)
+
+        integer, intent(in) :: i
+        real, intent(out) :: init_step
+        real, intent(in) :: step_max
+
+        double precision, allocatable, dimension(:) :: elon, elat, edep
+        double precision :: mmax, m
+        integer :: e
+
+        call current_event_positions(elon, elat, edep)
+        mmax = 0.0d0
+        do e = 1, size(elat)
+            if (model_name(i) == 'slon') then
+                m = (earth_radius - edep(e))*cos(geodetic_to_geocentric(elat(e)))*deg2rad
+            else
+                m = (earth_radius - edep(e))*dgeocentric_dgeodetic(elat(e))*deg2rad
+            end if
+            mmax = max(mmax, abs(model_srch(i)%array(e, 1, 1))*m)
+        end do
+        if (mmax == 0) then
+            init_step = 0.0
+        else
+            init_step = real(step_max/mmax)
+        end if
+
+    end subroutine initial_event_step_size
+
+    !
+    !> East-west and north-south reference cell sizes (module spherical)
+    !
+    double precision function reference_spacing_lon()
+        double precision, dimension(1:3) :: h
+        h = reference_spacing()
+        reference_spacing_lon = h(1)
+    end function reference_spacing_lon
+
+    double precision function reference_spacing_lat()
+        double precision, dimension(1:3) :: h
+        h = reference_spacing()
+        reference_spacing_lat = h(2)
+    end function reference_spacing_lat
 
     !
     !> Calculate optimal step size coefficient for some parameter
