@@ -2,14 +2,14 @@
 
 # Usage: ruby install.rb [clean] [name=value ...]
 #
+# Builds the spherical-coordinate 3D executables x_eikonal3, x_fatt3 and
+# x_tloc3 in the foreground.
+#
 # clean removes the old objects and executables before compiling. Each
 # name=value goes to make and overrides the variable of the same name in the
 # Makefiles, e.g.,
 #
-#   ruby install.rb clean use_cuda=on cuda_arch=sm_80
-#
-# also compiles the CUDA executables of the 3D solvers for the GPU
-# architecture sm_80.
+#   ruby install.rb clean flitdir=$HOME/flit
 
 require 'shellwords'
 
@@ -21,12 +21,9 @@ if not unknown.empty?
 end
 opts = Shellwords.join(options)
 
-for dir in ["2d", "3d"]
-
-        if clean
-                system(" cd #{dir}; make clean #{opts}; make #{opts} &")
-        else
-                system(" cd #{dir}; make #{opts} & ")
-        end
-
+# The spherical branch has 3D executables only
+if clean
+        system(" cd 3d; make clean #{opts}; make #{opts}")
+else
+        system(" cd 3d; make #{opts}")
 end

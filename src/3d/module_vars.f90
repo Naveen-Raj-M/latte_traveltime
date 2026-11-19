@@ -56,11 +56,7 @@ contains
                 case default
                     ! For model parameter update
 
-                    if (name == 'refl') then
-                        interpolation_method = 'nearest'
-                    else
-                        interpolation_method = 'linear'
-                    end if
+                    interpolation_method = 'linear'
 
                     w = zeros(nz, ny, nx)
 
@@ -174,7 +170,7 @@ contains
 
         select case (which_program)
 
-            case('fatt', 'trtt', 'tloc')
+            case('fatt', 'tloc')
 
                 ! Model static
                 if (nmodel_aux >= 1) then
@@ -342,7 +338,7 @@ contains
 
         integer :: i
 
-        if (yn_regularize_model .or. yn_regularize_source) then
+        if (yn_regularize_model) then
 
             allocate (model_reg(1:nmodel))
 

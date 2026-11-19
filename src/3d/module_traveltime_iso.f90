@@ -25,9 +25,6 @@ module traveltime_iso
     use parameters
     use utility
     use omp_lib
-#ifdef cuda
-    use traveltime_iso_cuda
-#endif
 
     implicit none
 
@@ -44,366 +41,6 @@ module traveltime_iso
 
 contains
 
-#ifdef legacy_solver
-
-    !
-    !> Parallel fast sweeping implementing
-    !> Detrixhe et al., 2013, JCP,
-    !> A parallel fast sweeping method for the Eikonal equation
-    !> doi: 10.1016/j.jcp.2012.11.042
-    !> with adaptions and modifications for 3D scenario
-    !
-    subroutine fast_sweep_forward(nx, ny, nz, nxd, nyd, nzd, dx, dy, dz, vp, t0, px0, py0, pz0, tau)
-
-        integer, intent(in) :: nx, ny, nz, nxd, nyd, nzd
-        double precision, intent(in) :: dx, dy, dz
-        double precision, dimension(:, :, :), intent(in) :: vp, t0, px0, py0, pz0
-        double precision, dimension(:, :, :), intent(inout) :: tau
-
-        integer :: nxbeg, nxend, nybeg, nyend, nzbeg, nzend
-        integer :: i, j, k
-        double precision :: signx, signy, signz
-        double precision :: root
-        double precision :: dxdt, dydt, dzdt
-        double precision :: taux, tauy, tauz, t0x, t0y, t0z
-        double precision :: tauc, t0c
-        double precision :: taucx, taucy, taucz
-        double precision :: px0c, py0c, pz0c
-        double precision :: v2
-        double precision :: u(3), d(3), array_tauc(3), array_tau(3), array_p0(3), array_t0(3), array_sign(3)
-        double precision :: da, db
-        double precision :: signa, signb
-        double precision :: dadt, dbdt
-        double precision :: taua, taub, t0a, t0b
-        double precision :: tauca, taucb
-        double precision :: pa0c, pb0c
-        double precision :: travel
-        integer :: i1, i2, j1, j2, k1, k2
-        double precision :: dada, dbdb, dxdx, dydy, dzdz
-        integer :: level, kbeg, kend, jbeg, jend
-
-        if (nxd > 0) then
-            nxbeg = 1
-            nxend = nx
-        else
-            nxbeg = nx
-            nxend = 1
-        end if
-
-        if (nyd > 0) then
-            nybeg = 1
-            nyend = ny
-        else
-            nybeg = ny
-            nyend = 1
-        end if
-
-        if (nzd > 0) then
-            nzbeg = 1
-            nzend = nz
-        else
-            nzbeg = nz
-            nzend = 1
-        end if
-
-        dxdx = dx**2
-        dydy = dy**2
-        dzdz = dz**2
-
-        ! In 3D, the maximum level is nz + (ny - 1) + (nx - 1)
-        do level = 1, nx + ny + nz - 2
-
-            kbeg = ifelse(level <= nx + ny - 1, nzbeg, nzbeg + (level - (nx + ny - 1))*nzd)
-            kend = ifelse(level <= nz, nzbeg + (level - 1)*nzd, nzend)
-
-            jbeg = ifelse(level <= nx + nz - 1, nybeg, nybeg + (level - (nx + nz - 1))*nyd)
-            jend = ifelse(level <= ny, nybeg + (level - 1)*nyd, nyend)
-
-            !$omp parallel do private(i, j, k, &
-                !$omp signx, signy, signz, &
-                !$omp root, &
-                !$omp dxdt, dydt, dzdt, &
-                !$omp taux, tauy, tauz, t0x, t0y, t0z, &
-                !$omp tauc, t0c, &
-                !$omp taucx, taucy, taucz, &
-                !$omp px0c, py0c, pz0c, &
-                !$omp v2, &
-                !$omp u, d, array_tauc, array_tau, array_p0, array_t0, array_sign, &
-                !$omp da, db, &
-                !$omp signa, signb, &
-                !$omp dadt, dbdt, &
-                !$omp taua, taub, t0a, t0b, &
-                !$omp tauca, taucb, &
-                !$omp pa0c, pb0c, &
-                !$omp travel, &
-                !$omp i1, i2, j1, j2, k1, k2, &
-                !$omp dada, dbdb) collapse(2) schedule(dynamic)
-            do k = kbeg, kend, nzd
-                do j = jbeg, jend, nyd
-
-                    ! The condition is
-                    ! abs(i - nxbeg) + abs(j - nybeg) + abs(k - nzbeg) + 1 = level
-                    i = ((level - 1) - abs(k - nzbeg) - abs(j - nybeg))/nxd + nxbeg
-
-                    ! Different from 2D, in 3D, the above condition can satisfy with out-of-range i values.
-                    ! This can potentially cause load unbalance, but is the best I can do at this moment.
-                    if (i < 1 .or. i > nx) then
-                        cycle
-                    end if
-
-                    v2 = vp(i, j, k)**2
-                    tauc = tau(i, j, k)
-                    t0c = t0(i, j, k)
-                    px0c = px0(i, j, k)
-                    py0c = py0(i, j, k)
-                    pz0c = pz0(i, j, k)
-
-                    if (i == 1) then
-
-                        i1 = i
-                        i2 = i + 1
-
-                        taux = tau(i2, j, k)
-                        t0x = t0(i2, j, k)
-                        signx = -1.0
-
-                    else if (i == nx) then
-
-                        i1 = i - 1
-                        i2 = i
-
-                        taux = tau(i1, j, k)
-                        t0x = t0(i1, j, k)
-                        signx = 1.0
-
-                    else
-
-                        i1 = i - 1
-                        i2 = i + 1
-
-                        if (tau(i1, j, k)*t0(i1, j, k) <= tau(i2, j, k)*t0(i2, j, k)) then
-                            taux = tau(i1, j, k)
-                            t0x = t0(i1, j, k)
-                            signx = 1.0
-                        else
-                            taux = tau(i2, j, k)
-                            t0x = t0(i2, j, k)
-                            signx = -1.0
-                        end if
-
-                    end if
-
-                    if (j == 1) then
-
-                        j1 = j
-                        j2 = j + 1
-
-                        tauy = tau(i, j2, k)
-                        t0y = t0(i, j2, k)
-                        signy = -1.0
-
-                    else if (j == ny) then
-
-                        j1 = j - 1
-                        j2 = j
-
-                        tauy = tau(i, j1, k)
-                        t0y = t0(i, j1, k)
-                        signy = 1.0
-
-                    else
-
-                        j1 = j - 1
-                        j2 = j + 1
-
-                        if (tau(i, j1, k)*t0(i, j1, k) <= tau(i, j2, k)*t0(i, j2, k)) then
-                            tauy = tau(i, j1, k)
-                            t0y = t0(i, j1, k)
-                            signy = 1.0
-                        else
-                            tauy = tau(i, j2, k)
-                            t0y = t0(i, j2, k)
-                            signy = -1.0
-                        end if
-
-                    end if
-
-                    if (k == 1) then
-
-                        k1 = k
-                        k2 = k + 1
-
-                        tauz = tau(i, j, k2)
-                        t0z = t0(i, j, k2)
-                        signz = -1.0
-
-                    else if (k == nz) then
-
-                        k1 = k - 1
-                        k2 = k
-
-                        tauz = tau(i, j, k1)
-                        t0z = t0(i, j, k1)
-                        signz = 1.0
-
-                    else
-
-                        k1 = k - 1
-                        k2 = k + 1
-
-                        if (tau(i, j, k1)*t0(i, j, k1) <= tau(i, j, k2)*t0(i, j, k2)) then
-                            tauz = tau(i, j, k1)
-                            t0z = t0(i, j, k1)
-                            signz = 1.0
-                        else
-                            tauz = tau(i, j, k2)
-                            t0z = t0(i, j, k2)
-                            signz = -1.0
-                        end if
-
-                    end if
-
-                    if (taux == huge_value .and. tauy == huge_value .and. tauz == huge_value) then
-                        cycle
-                    end if
-
-                    taucx = (t0c*taux + dx/vp(i, j, k))/(t0c + abs(px0c)*dx)
-                    taucy = (t0c*tauy + dy/vp(i, j, k))/(t0c + abs(py0c)*dy)
-                    taucz = (t0c*tauz + dz/vp(i, j, k))/(t0c + abs(pz0c)*dz)
-
-                    u(1) = min(tau(i1, j, k)*t0(i1, j, k), tau(i2, j, k)*t0(i2, j, k))
-                    u(2) = min(tau(i, j1, k)*t0(i, j1, k), tau(i, j2, k)*t0(i, j2, k))
-                    u(3) = min(tau(i, j, k1)*t0(i, j, k1), tau(i, j, k2)*t0(i, j, k2))
-                    d = [dx, dy, dz]
-                    array_tauc = [taucx, taucy, taucz]
-                    array_p0 = [px0c, py0c, pz0c]
-                    array_tau = [taux, tauy, tauz]
-                    array_t0 = [t0x, t0y, t0z]
-                    array_sign = [signx, signy, signz]
-
-                    if (u(1) == huge_value .and. u(2) == huge_value .and. u(3) == huge_value) then
-                        cycle
-                    end if
-
-                    if (u(1) > u(3)) then
-                        call swap(u(1), u(3))
-                        call swap(d(1), d(3))
-                        call swap(array_tau(1), array_tau(3))
-                        call swap(array_t0(1), array_t0(3))
-                        call swap(array_sign(1), array_sign(3))
-                        call swap(array_p0(1), array_p0(3))
-                        call swap(array_tauc(1), array_tauc(3))
-                    end if
-                    if (u(1) > u(2)) then
-                        call swap(u(1), u(2))
-                        call swap(d(1), d(2))
-                        call swap(array_tau(1), array_tau(2))
-                        call swap(array_t0(1), array_t0(2))
-                        call swap(array_sign(1), array_sign(2))
-                        call swap(array_p0(1), array_p0(2))
-                        call swap(array_tauc(1), array_tauc(2))
-                    end if
-                    if (u(2) > u(3)) then
-                        call swap(u(2), u(3))
-                        call swap(d(2), d(3))
-                        call swap(array_tau(2), array_tau(3))
-                        call swap(array_t0(2), array_t0(3))
-                        call swap(array_sign(2), array_sign(3))
-                        call swap(array_p0(2), array_p0(3))
-                        call swap(array_tauc(2), array_tauc(3))
-                    end if
-
-                    travel = u(1) + d(1)/vp(i, j, k)
-                    tauc = travel/t0(i, j, k)
-                    if (travel > u(2)) then
-                        ! Consider the 2D plane case
-                        ! Here, new notations (a, b) are used
-
-                        da = d(1)
-                        db = d(2)
-                        dada = da**2
-                        dbdb = db**2
-                        taua = array_tau(1)
-                        taub = array_tau(2)
-                        t0a = array_t0(1)
-                        t0b = array_t0(2)
-                        signa = array_sign(1)
-                        signb = array_sign(2)
-                        pa0c = array_p0(1)
-                        pb0c = array_p0(2)
-                        tauca = array_tauc(1)
-                        taucb = array_tauc(2)
-
-                        ! Sovling the quadratic equation analbtically
-                        root = (da*dbdb*pa0c*signa*t0c*taua*v2 + dbdb*signa**2*t0c**2*taua*v2 + &
-                            dada*(signb*t0c*(db*pb0c + signb*t0c)*taub*v2 + &
-                            dbdb*sqrt((v2*(dada*dbdb*(pa0c**2 + pb0c**2) + 2*da*dbdb*pa0c*signa*t0c + 2*dada*db*pb0c*signb*t0c + &
-                            dbdb*signa**2*t0c**2 + dada*signb**2*t0c**2 - &
-                            (signa*t0c*(db*pb0c + signb*t0c)*taua - signb*t0c*(da*pa0c + signa*t0c)*taub)**2*v2))/(dada*dbdb))))/ &
-                            ((dada*dbdb*(pa0c**2 + pb0c**2) + 2*da*db*(db*pa0c*signa + da*pb0c*signb)*t0c + &
-                            (dbdb*signa**2 + dada*signb**2)*t0c**2)*v2)
-
-                        dadt = (root*t0c - taua*t0a)/(signa*da)
-                        dbdt = (root*t0c - taub*t0b)/(signb*db)
-
-                        if (dadt*signa > 0 .and. dbdt*signb > 0) then
-                            tauc = root
-                        else
-                            if (tauca*t0a < taucb*t0b) then
-                                tauc = tauca
-                            else
-                                tauc = taucb
-                            end if
-                        end if
-
-                        travel = tauc*t0(i, j, k)
-                        if (travel > u(3)) then
-                            ! Consider the 3D cuboid case
-                            ! In this case, the order of u no long matters, and for convenience
-                            ! here I just use the x-y-z notation to avoid more new symbols
-
-                            ! Solve the quadratic equation analytically
-                            root = (dx*dydy*dzdz*px0c*signx*t0c*taux*v2 + dydy*dzdz*signx**2*t0c**2*taux*v2 + &
-                                dxdx*t0c*(dzdz*signy*(dy*py0c + signy*t0c)*tauy + dydy*signz*(dz*pz0c + signz*t0c)*tauz)*v2 + &
-                                dxdx*dydy*dzdz*sqrt(v2*(((dzdz*t0c*(dydy*signx*(dx*px0c + signx*t0c)*taux + &
-                                dxdx*signy*(dy*py0c + signy*t0c)*tauy) + dxdx*dydy*signz*t0c*(dz*pz0c + signz*t0c)*tauz)**2*v2)/ &
-                                (dxdx*dydy*dzdz)**2 - (px0c**2 + py0c**2 + pz0c**2 + (2*px0c*signx*t0c)/dx + &
-                                t0c*((2*py0c*signy)/dy + (signx**2*t0c)/dxdx + (signy**2*t0c)/dydy + (signz*(2*dz*pz0c + signz*t0c))/dzdz))* &
-                                (-1 + t0c**2*((signx**2*taux**2)/dxdx + (signy**2*tauy**2)/dydy + (signz**2*tauz**2)/dzdz)*v2))))/ &
-                                ((dxdx*dydy*dzdz*(px0c**2 + py0c**2 + pz0c**2) + &
-                                2*dx*dy*dz*(dy*dz*px0c*signx + dx*dz*py0c*signy + dx*dy*pz0c*signz)*t0c + &
-                                (dxdx*dzdz*signy**2 + dydy*(dzdz*signx**2 + dxdx*signz**2))*t0c**2)*v2)
-
-                            dxdt = (root*t0c - taux*t0x)/(signx*dx)
-                            dydt = (root*t0c - tauy*t0y)/(signy*dy)
-                            dzdt = (root*t0c - tauz*t0z)/(signz*dz)
-
-                            if (dxdt*signx > 0 .and. dydt*signy > 0 .and. dzdt*signz > 0) then
-                                tauc = root
-                            else
-                                if (taucx*t0x < taucz*t0z .and. taucx*t0x < taucy*t0y) then
-                                    tauc = taucx
-                                else if (taucy*t0y < taucz*t0z .and. taucy*t0y < taucx*t0x) then
-                                    tauc = taucy
-                                else
-                                    tauc = taucz
-                                end if
-                            end if
-
-                        end if
-                    end if
-
-                    tau(i, j, k) = min(tau(i, j, k), tauc)
-
-                end do
-            end do
-            !$omp end parallel do
-
-        end do
-
-    end subroutine fast_sweep_forward
-
-#else
 
     !
     ! Fast sweeping local solver
@@ -701,7 +338,6 @@ contains
 
     end subroutine fast_sweep_forward
 
-#endif
 
     !
     !> Fast sweeping to solve the adjoint state equation
@@ -1206,16 +842,13 @@ contains
     !
     !> Fast sweeping factorized eikonal solver
     !
-    subroutine forward_iso(v, d, o, geom, t, trec, pdx, pdy, pdz)
+    subroutine forward_iso(v, d, o, geom, t, trec)
 
         real, dimension(:, :, :), intent(in) :: v
         real, dimension(1:3), intent(in) :: d, o
         type(source_receiver_geometry), intent(in) :: geom
         real, allocatable, dimension(:, :, :), intent(out) :: t
         real, allocatable, dimension(:, :), intent(out) :: trec
-        real, allocatable, dimension(:, :, :), intent(out), optional :: pdx
-        real, allocatable, dimension(:, :, :), intent(out), optional :: pdy
-        real, allocatable, dimension(:, :, :), intent(out), optional :: pdz
 
         double precision, allocatable, dimension(:, :, :) :: tt, tt_prev, vp
         double precision :: dx, dy, dz, ox, oy, oz
@@ -1308,15 +941,6 @@ contains
         ! For timing the modeling, commented out for clarity
         time1 = omp_get_wtime()
 
-#if defined(cuda) && !defined(legacy_solver)
-        ! On a GPU, all the iterations run here, and the loop below does not
-        ! start. If the GPU fails, niter stays 0, and the loop runs on the CPU.
-        if (use_gpu()) then
-            call fast_sweep_forward_gpu(nx, ny, nz, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt, &
-                dble(huge_value), niter, ttdiff)
-        end if
-#endif
-
         do while (ttdiff >= sweep_stop_threshold .and. niter < sweep_niter_max)
 
             tt_prev = tt
@@ -1343,54 +967,6 @@ contains
             tt = 0
             vp = 0
         end where
-
-        ! Compute gradients of final traveltime field using finite differences
-        ! Only compute if gradient output is requested
-        if (present(pdx) .or. present(pdy) .or. present(pdz)) then
-            !$omp parallel do private(i, j, k)
-            do k = 1, nz
-                do j = 1, ny
-                    do i = 1, nx
-                        ! Gradient in x-direction using finite differences
-                        if (i == 1) then
-                            ! Forward difference at left boundary
-                            pdxt0(i, j, k) = (tt(i + 1, j, k) - tt(i, j, k))/dx
-                        else if (i == nx) then
-                            ! Backward difference at right boundary
-                            pdxt0(i, j, k) = (tt(i, j, k) - tt(i - 1, j, k))/dx
-                        else
-                            ! Centered difference in interior
-                            pdxt0(i, j, k) = (tt(i + 1, j, k) - tt(i - 1, j, k))/(2.0d0*dx)
-                        end if
-
-                        ! Gradient in y-direction using finite differences
-                        if (j == 1) then
-                            ! Forward difference at front boundary
-                            pdyt0(i, j, k) = (tt(i, j + 1, k) - tt(i, j, k))/dy
-                        else if (j == ny) then
-                            ! Backward difference at back boundary
-                            pdyt0(i, j, k) = (tt(i, j, k) - tt(i, j - 1, k))/dy
-                        else
-                            ! Centered difference in interior
-                            pdyt0(i, j, k) = (tt(i, j + 1, k) - tt(i, j - 1, k))/(2.0d0*dy)
-                        end if
-
-                        ! Gradient in z-direction using finite differences
-                        if (k == 1) then
-                            ! Forward difference at top boundary
-                            pdzt0(i, j, k) = (tt(i, j, k + 1) - tt(i, j, k))/dz
-                        else if (k == nz) then
-                            ! Backward difference at bottom boundary
-                            pdzt0(i, j, k) = (tt(i, j, k) - tt(i, j, k - 1))/dz
-                        else
-                            ! Centered difference in interior
-                            pdzt0(i, j, k) = (tt(i, j, k + 1) - tt(i, j, k - 1))/(2.0d0*dz)
-                        end if
-                    end do
-                end do
-            end do
-            !$omp end parallel do
-        end if
 
         ! Get the traveltime values at the receivers, if necessary
         trec = zeros(geom%nr, 1)
@@ -1444,17 +1020,6 @@ contains
             end if
         end do
         !$omp end parallel do
-
-        ! Output gradient fields if requested
-        if (present(pdx)) then
-            pdx = permute(pdxt0, 321)
-        end if
-        if (present(pdy)) then
-            pdy = permute(pdyt0, 321)
-        end if
-        if (present(pdz)) then
-            pdz = permute(pdzt0, 321)
-        end if
 
         t = permute(tt, 321)
 
@@ -1583,20 +1148,6 @@ contains
 
         ! Fast sweep to solve the adjoint-state equation
         iter = 0
-
-#ifdef cuda
-        ! On a GPU, all the iterations run here, and the loop below does not
-        ! start. If the GPU fails, iter stays 0, and the loop runs on the CPU.
-        if (use_gpu()) then
-            if (point_source) then
-                call fast_sweep_adjoint_gpu(nx, ny, nz, dx, dy, dz, tt, recrflag, lambda, &
-                    dble(huge_value), iter, lambda_diff, adjsrc)
-            else
-                call fast_sweep_adjoint_gpu(nx, ny, nz, dx, dy, dz, tt, recrflag, lambda, &
-                    dble(huge_value), iter, lambda_diff)
-            end if
-        end if
-#endif
 
         do while (lambda_diff >= sweep_stop_threshold .and. iter < sweep_niter_max)
 

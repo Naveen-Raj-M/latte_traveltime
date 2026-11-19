@@ -298,12 +298,7 @@ contains
                             tmp = compute_search_direction_lbfgs_single_parameter(model_name(i))
                     end select
 
-#ifdef dim2
-                    model_srch(i)%array = reshape(tmp, [nz, nx])
-#endif
-#ifdef dim3
                     model_srch(i)%array = reshape(tmp, [nz, ny, nx])
-#endif
 
                 case('sx', 'sy', 'sz', 'st0')
 
@@ -319,12 +314,7 @@ contains
                             tmp = compute_search_direction_lbfgs_single_parameter(model_name(i))
                     end select
 
-#ifdef dim2
-                    model_srch(i)%array = reshape(tmp, [nr_virtual, 1])
-#endif
-#ifdef dim3
                     model_srch(i)%array = reshape(tmp, [nr_virtual, 1, 1])
-#endif
 
             end select
 

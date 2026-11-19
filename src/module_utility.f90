@@ -39,7 +39,6 @@ module utility
     public :: point_in_domain
     public :: within_the_same_grid
     public :: get_point_value_inside
-    public :: write_gradient_metadata
 
 contains
 
@@ -670,7 +669,7 @@ contains
 
         real, allocatable, dimension(:, :) :: weight, ttp_misfit
         integer :: i, j
-        real :: d, omin, omax
+        real :: d
 
         if (yn_dd_no_st0) then
 
@@ -714,7 +713,7 @@ contains
         else
 
             ! Read observed data
-            ttp_obs = load(tidy(dir_field)//'/shot_'//num2str(gmtr(ishot)%id)//'_traveltime_'//tidy(label)//'.bin', gmtr(ishot)%nr, nrefl + 1)
+            ttp_obs = load(tidy(dir_field)//'/shot_'//num2str(gmtr(ishot)%id)//'_traveltime_'//tidy(label)//'.bin', gmtr(ishot)%nr, 1)
 
             ! Compute traveltime misfit
             call traveltime_residual(ttp_syn, ttp_obs, ttp_residual, ttp_misfit)
@@ -746,18 +745,6 @@ contains
         end do
         !$omp end parallel do
 
-        ! For the reflection data of trtt, zero the weights outside the offset
-        ! range in use (reflection_offset_range), which depends on whether the
-        ! reflectors are being imaged or refined
-        if (which_program == 'trtt') then
-            call reflection_offset_range(omin, omax)
-            do i = 1, gmtr(ishot)%nr
-                if (gmtr(ishot)%recr(i)%aoff < omin .or. gmtr(ishot)%recr(i)%aoff > omax) then
-                    weight(i, 2:) = 0
-                end if
-            end do
-        end if
-
         if (present(weight_used)) then
             weight_used = weight
         end if
@@ -770,208 +757,9 @@ contains
 
     end subroutine compute_shot_misfit
 
-    !
-    !> Write gradient field metadata for postprocessing
-    !> This writes the local grid parameters for each shot to enable
-    !> correct ray path visualization in Python postprocessing
-    !
-    subroutine write_gradient_metadata(shot_id, dir, ox, oy, oz, nx, ny, nz, dx, dy, dz)
-
-        integer, intent(in) :: shot_id
-        character(len=*), intent(in) :: dir
-        real, intent(in) :: ox, oy, oz
-        integer, intent(in) :: nx, ny, nz
-        real, intent(in) :: dx, dy, dz
-
-        character(len=1024) :: filename
-        integer :: funit
-
-        ! Construct metadata filename
-        filename = tidy(dir)//'/shot_'//num2str(shot_id)//'_gradient_metadata.txt'
-
-        ! Open file for writing using standard Fortran I/O
-        open(newunit=funit, file=filename, status='replace', action='write')
-
-        ! Write metadata in simple key=value format
-        write(funit, '(a)') '# LATTE Gradient Field Metadata'
-        write(funit, '(a,i0)') '# Shot ID: ', shot_id
-        write(funit, '(a)') '#'
-        write(funit, '(a)') '# Local grid parameters for this shot:'
-        write(funit, '(a)') '# - origin_x/y/z: Origin of the local grid in km'
-        write(funit, '(a)') '# - nx/ny/nz: Number of grid points in each dimension'
-        write(funit, '(a)') '# - dx/dy/dz: Grid spacing in km'
-        write(funit, '(a)') '#'
-        write(funit, '(a,es16.8)') 'origin_x = ', ox
-        write(funit, '(a,es16.8)') 'origin_y = ', oy
-        write(funit, '(a,es16.8)') 'origin_z = ', oz
-        write(funit, '(a,i0)') 'nx = ', nx
-        write(funit, '(a,i0)') 'ny = ', ny
-        write(funit, '(a,i0)') 'nz = ', nz
-        write(funit, '(a,es16.8)') 'dx = ', dx
-        write(funit, '(a,es16.8)') 'dy = ', dy
-        write(funit, '(a,es16.8)') 'dz = ', dz
-
-        ! Close file
-        close(funit)
-
-    end subroutine write_gradient_metadata
 
 
-#ifdef dim2
 
-    !
-    ! Check if a point is inside of the model domain
-    !
-    function point_in_domain(p, n, o, d, v) result(f)
-
-        double precision, dimension(:) :: p, o, d
-        integer, dimension(:) :: n
-        double precision, dimension(:, :) :: v
-        logical :: f
-
-        double precision :: p1, p2
-        integer :: n1, n2
-        double precision :: d1, d2, o1, o2
-        integer, dimension(1:2) :: ii, jj
-        integer :: i, j
-
-        f = .true.
-
-        n1 = n(1)
-        n2 = n(2)
-        d1 = d(1)
-        d2 = d(2)
-        o1 = o(1)
-        o2 = o(2)
-        p1 = p(1) - o1
-        p2 = p(2) - o2
-
-        if (p1 < 0 .or. p1 > (n1 - 1)*d1 &
-                .or. p2 < 0 .or. p2 > (n2 - 1)*d2) then
-            f = .false.
-            return
-        end if
-
-        ii = [floor(p1/d1) + 1, ceiling(p1/d1) + 1]
-        jj = [floor(p2/d2) + 1, ceiling(p2/d2) + 1]
-        do i = 1, 2
-            do j = 1, 2
-                if (v(ii(i), jj(j)) == 0) then
-                    f = .false.
-                    return
-                end if
-            end do
-        end do
-
-    end function point_in_domain
-
-    !
-    ! Linear interpolation to get the value of a point inside a grid
-    !
-    function get_point_value_inside(p, n, o, d, v) result(f)
-
-        double precision, dimension(:) :: p, o, d
-        integer, dimension(:) :: n
-        double precision, dimension(:, :) :: v
-        double precision :: f
-
-        double precision :: p1, p2
-        integer :: n1, n2
-        double precision :: d1, d2, o1, o2
-        integer :: i1beg, i1end
-        integer :: i2beg, i2end
-
-        f = .true.
-
-        n1 = n(1)
-        n2 = n(2)
-        d1 = d(1)
-        d2 = d(2)
-        o1 = o(1)
-        o2 = o(2)
-        p1 = p(1) - o1
-        p2 = p(2) - o2
-
-        i1beg = floor(p1/d1) + 1
-        i1end = ceiling(p1/d1) + 1
-        i2beg = floor(p2/d2) + 1
-        i2end = ceiling(p2/d2) + 1
-
-        if (i1beg == i1end .and. i2beg == i2end) then
-
-            f = v(i1beg, i2beg)
-
-        else if (i1beg == i1end .and. i2beg /= i2end) then
-
-            f = point_interp_linear( &
-                ([i2beg, i2end] - 1)*d2, &
-                v(i1beg, i2beg:i2end), &
-                p2)
-
-        else if (i1beg /= i1end .and. i2beg == i2end) then
-
-            f = point_interp_linear( &
-                ([i1beg, i1end] - 1)*d1, &
-                v(i1beg:i1end, i2beg), &
-                p1)
-
-        else
-
-            f = point_interp_linear( &
-                ([i1beg, i1end] - 1)*d1, &
-                ([i2beg, i2end] - 1)*d2, &
-                v(i1beg:i1end, i2beg:i2end), &
-                p1, p2)
-
-        end if
-
-    end function get_point_value_inside
-
-    !
-    ! Check if two points are in the same grid
-    !
-    function within_the_same_grid(pa, pb, o, d) result(f)
-
-        double precision, dimension(:) :: pa, pb, o, d
-        logical :: f
-
-        double precision :: p1_a, p2_a
-        double precision :: p1_b, p2_b
-        double precision :: d1, d2, o1, o2
-        integer :: i1beg_a, i1end_a
-        integer :: i2beg_a, i2end_a
-        integer :: i1beg_b, i1end_b
-        integer :: i2beg_b, i2end_b
-
-        d1 = d(1)
-        d2 = d(2)
-        o1 = o(1)
-        o2 = o(2)
-        p1_a = pa(1) - o1
-        p2_a = pa(2) - o2
-        p1_b = pb(1) - o1
-        p2_b = pb(2) - o2
-
-        i1beg_a = floor(p1_a/d1) + 1
-        i1end_a = ceiling(p1_a/d1) + 1
-        i2beg_a = floor(p2_a/d2) + 1
-        i2end_a = ceiling(p2_a/d2) + 1
-
-        i1beg_b = floor(p1_b/d1) + 1
-        i1end_b = ceiling(p1_b/d1) + 1
-        i2beg_b = floor(p2_b/d2) + 1
-        i2end_b = ceiling(p2_b/d2) + 1
-
-        f = i1beg_a == i1beg_b &
-            .and. i1end_a == i1end_b &
-            .and. i2beg_a == i2beg_b &
-            .and. i2end_a == i2end_b
-
-    end function within_the_same_grid
-
-#endif
-
-#ifdef dim3
 
     !
     ! Check if a point is inside of the model domain
@@ -1182,6 +970,5 @@ contains
 
     end function within_the_same_grid
 
-#endif
 
 end module utility

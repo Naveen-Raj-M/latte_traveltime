@@ -33,7 +33,6 @@ module parameters
     character(len=1024) :: dir_synthetic
     character(len=1024) :: dir_snapshot
     character(len=1024) :: dir_adjoint
-    character(len=1024) :: dir_gradient
 
     character(len=1204) :: file_geometry
 
@@ -45,8 +44,6 @@ module parameters
     ! snapshot times
     real, allocatable, dimension(:) :: snaps
 
-    ! traveltime gradient storage flag
-    logical :: yn_save_traveltime_gradients = .false.
 
     ! shot index and division related
     integer, allocatable, dimension(:, :) :: shot_in_rank
@@ -78,9 +75,7 @@ module parameters
 
     ! regularization for inversion
     character(len=32), allocatable, dimension(:) :: model_regularization_method
-    character(len=32), allocatable, dimension(:) :: source_regularization_method
     logical :: yn_regularize_model = .false.
-    logical :: yn_regularize_source = .false.
 
     ! inversion parameters
     integer :: iter
@@ -109,13 +104,6 @@ module parameters
     ! maximum and minimum offset
     real :: offset_min = 0.0d0
     real :: offset_max = float_huge
-    real :: offset_min_refl = 0.0d0
-    real :: offset_max_refl = float_huge
-    ! Largest offset of the reflections that set the reflector depths, in the
-    ! imaging, the refinement and the image guard of TRTT, and whether these
-    ! are running, so that the reflection misfit uses this offset
-    real :: offset_max_refl_depth = float_huge
-    logical :: yn_refl_depth_offsets = .false.
 
     ! source id
     integer :: sid_min = 1
@@ -157,8 +145,8 @@ module parameters
     character(len=12) :: adjoint_receiver = 'nearest'
     real :: misfit_threshold
 
-    character(len=1024) :: file_andfaux, file_andfcoh
 
+    character(len=1024) :: file_andfaux, file_andfcoh
     integer :: resume_from_iter
 
     character(len=1024) :: file_datamisfit, file_shotmisfit
@@ -185,12 +173,9 @@ module parameters
 
     character(len=32) :: data_prefix = 'traveltime'
 
-    integer :: nrefl = 0
-    logical :: yn_update_reflector = .false.
     logical :: yn_precond = .true.
     logical :: yn_output_dws = .false.
 
-    character(len=12) :: incident_wave = 'p'
     real :: precond_eps = 1.0e-4
 
     ! Dimension
@@ -290,7 +275,7 @@ contains
                     file_parameter = tmpparam
                     call warn(' Parameter file: '//tidy(file_parameter))
                 end if
-            case ('fatt', 'trtt', 'tloc')
+            case ('fatt', 'tloc')
                 call readpar_string(file_parameter, 'dir_working', dir_working, './test')
                 call make_directory(dir_working)
                 if (rankid == 0) then
@@ -311,7 +296,6 @@ contains
         call readpar_float(file_parameter, 'vpvsratio_smoothx', vpvsratio_smoothx, 0.0)
         call readpar_float(file_parameter, 'vpvsratio_smoothy', vpvsratio_smoothy, 0.0)
         call readpar_float(file_parameter, 'vpvsratio_smoothz', vpvsratio_smoothz, 0.0)
-        call readpar_string(file_parameter, 'incident_wave', incident_wave, 'p')
 
         call readpar_float(file_parameter, 'misfit_threshold', misfit_threshold, float_huge)
 
@@ -352,12 +336,8 @@ contains
         call readpar_string(file_parameter, 'dir_record', dir_record, './data')
 
         call readpar_nstring(file_parameter, 'model_regularization_method', model_regularization_method, [''])
-        call readpar_nstring(file_parameter, 'source_regularization_method', source_regularization_method, [''])
         if (model_regularization_method(1) /= '') then
             yn_regularize_model = .true.
-        end if
-        if (source_regularization_method(1) /= '') then
-            yn_regularize_source = .true.
         end if
         call readpar_int(file_parameter, 'niter_max', niter_max, 100)
 
@@ -386,16 +366,6 @@ contains
         call readpar_string(file_parameter, 'dir_snapshot', dir_snapshot, './snapshot')
         call readpar_string(file_parameter, 'dir_synthetic', dir_synthetic, './data_synthetic')
         call assert(dir_snapshot /= dir_synthetic, ' <read_parameters> Error: dir_snapshot and dir_synthetic cannot be the same. ')
-
-        call readpar_logical(file_parameter, 'yn_save_traveltime_gradients', yn_save_traveltime_gradients, .false.)
-        call readpar_string(file_parameter, 'dir_gradient', dir_gradient, './gradient')
-        call assert(dir_gradient /= dir_synthetic, ' <read_parameters> Error: dir_gradient and dir_synthetic cannot be the same. ')
-        call assert(dir_gradient /= dir_snapshot, ' <read_parameters> Error: dir_gradient and dir_snapshot cannot be the same. ')
-
-        ! Ray path parameters are initialized via the raypath module
-        ! Parameters: raypath_save, raypath_dir, raypath_step_size, raypath_tolerance,
-        !             raypath_max_steps, raypath_interpolation, raypath_adaptive_step,
-        !             raypath_hybrid_mode, raypath_momentum_mode
 
         call readpar_logical(file_parameter, 'verbose', verbose, .false.)
         call readpar_float(file_parameter, 'sweep_stop_threshold', sweep_stop_threshold, 1.0e-4)
@@ -451,18 +421,11 @@ contains
                     case ('c', 'C')
                         valmin = 0.0
                         valmax = 1.0e9
-                    case ('refl')
-                        valmin = 0.0
-                        valmax = 1.0e9
                 end select
                 call readpar_float(file_parameter, 'min_'//tidy(model_name(i)), model_min(i), valmin)
                 call readpar_float(file_parameter, 'max_'//tidy(model_name(i)), model_max(i), valmax)
                 ! The program allows using different search method for different parameters
                 call readpar_string(file_parameter, 'search_method_'//tidy(model_name(i)), model_search_method(i), search_method)
-                ! For reflector, the only available option now is SD
-                if (model_name(i) == 'refl') then
-                    model_search_method(i) = 'SD'
-                end if
             end do
 
             if (which_program == 'tloc' .and. .not.any_in(['st0'], model_name) .and. (misfit_type == 'dd' .or. misfit_type == 'double-difference')) then
@@ -481,19 +444,7 @@ contains
         end select
         ndata = size(data_name)
 
-        if (which_program == 'trtt') then
-            call readpar_int(file_parameter, 'nrefl', nrefl, 1)
-            call readpar_nfloat(file_parameter, 'misfit_weight', misfit_weight, ones(nrefl + 1))
-            call assert(size(misfit_weight) == nrefl + 1, ' <read_parameter> Error: size(misfit_weight) must be nrefl + 1. Exiting. ')
-            if (any_in(['refl'], model_name)) then
-                yn_update_reflector = .true.
-            end if
-            call readpar_float(file_parameter, 'offset_min_refl', offset_min_refl, 0.0)
-            call readpar_float(file_parameter, 'offset_max_refl', offset_max_refl, float_huge)
-            call readpar_float(file_parameter, 'offset_max_refl_depth', offset_max_refl_depth, offset_max_refl)
-        else
-            call readpar_nfloat(file_parameter, 'misfit_weight', misfit_weight, ones(1))
-        end if
+        call readpar_nfloat(file_parameter, 'misfit_weight', misfit_weight, ones(1))
 
     end subroutine read_parameters
 
@@ -1010,34 +961,5 @@ contains
         end if
 
     end subroutine set_adaptive_model_range
-
-    function source_receiver_coincide(s, r, threshold) result(y)
-
-        type(source) :: s
-        type(receiver) :: r
-        real :: threshold
-        logical :: y
-
-        y = norm2([s%x, s%y, s%z] - [r%x, r%y, r%z]) <= threshold
-
-    end function source_receiver_coincide
-
-    !
-    !> The offset range of the reflection data in use. While TRTT images or
-    !> refines the reflectors, the largest offset is offset_max_refl_depth,
-    !> within offset_max_refl.
-    !
-    subroutine reflection_offset_range(omin, omax)
-
-        real, intent(out) :: omin, omax
-
-        omin = offset_min_refl
-        if (yn_refl_depth_offsets) then
-            omax = min(offset_max_refl_depth, offset_max_refl)
-        else
-            omax = offset_max_refl
-        end if
-
-    end subroutine reflection_offset_range
 
 end module parameters

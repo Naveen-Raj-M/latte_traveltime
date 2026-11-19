@@ -26,13 +26,7 @@ module inversion_step_size
 
     implicit none
 
-#ifdef dim2
-#define model_dimension dimension(:, :)
-#endif
-
-#ifdef dim3
 #define model_dimension dimension(:, :, :)
-#endif
 
     private
 
@@ -194,16 +188,6 @@ contains
 
         do i = 1, nmodel
 
-            ! The reflectors change only in the joint update of their depths
-            ! (step_max_refl > 0): row l of the search direction holds the depth
-            ! change of reflector l by column
-            if (model_m(i)%name == 'refl') then
-                if (model_step(i) /= 0) then
-                    call move_reflector(model_m(i)%array, model_step(i)*model_srch(i)%array*step)
-                end if
-                cycle
-            end if
-
             model_m(i)%array = model_m(i)%array + model_step(i)*model_srch(i)%array*step
 
             ! Box-clip model
@@ -256,10 +240,6 @@ contains
                     valstep = 0.1
                 case ('c', 'C')
                     valstep = 1.0e9
-                case ('refl')
-                    ! Largest change of a reflector depth in the joint update; zero
-                    ! leaves the reflectors to imaging and refinement
-                    valstep = 0.0
                 case ('sx')
                     valstep = 0.1*(nx - 1)*dx
                 case ('sy')
@@ -351,19 +331,19 @@ contains
 
             ! Read data
             nr = gmtr(srcindex)%nr
-            seis_obs = load(file_recorded, nr, nrefl + 1)
-            seis_syn = load(file_synthetic, nr, nrefl + 1)
-            seis_syn_prev = load(file_synthetic_prev, nr, nrefl + 1)
+            seis_obs = load(file_recorded, nr, 1)
+            seis_syn = load(file_synthetic, nr, 1)
+            seis_syn_prev = load(file_synthetic_prev, nr, 1)
 
             call traveltime_residual(seis_syn, seis_syn_prev, r1, m1)
             call traveltime_residual(seis_obs, seis_syn_prev, r2, m2)
 
         end if
 
-        weight = zeros(nr, nrefl + 1)
+        weight = zeros(nr, 1)
         !$omp parallel do private(i, j)
         do i = 1, nr
-            do j = 1, nrefl + 1
+            do j = 1, 1
 
                 if (yn_separate_ps_weight) then
                     if (component_name == 'p') then
@@ -376,12 +356,6 @@ contains
                 end if
 
                 if (abs(r1(i, j)) > misfit_threshold .or. abs(r2(i, j)) > misfit_threshold) then
-                    weight(i, j) = 0
-                end if
-
-                ! For reflection data
-                if (j > 1 .and. (gmtr(srcindex)%recr(i)%aoff < offset_min_refl &
-                        .or. gmtr(srcindex)%recr(i)%aoff > offset_max_refl)) then
                     weight(i, j) = 0
                 end if
 

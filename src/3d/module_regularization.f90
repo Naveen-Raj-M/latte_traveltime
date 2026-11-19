@@ -148,11 +148,9 @@ contains
         real, intent(in) :: default_value
         logical, intent(in), optional :: smooth_inverse
 
-        integer :: i, n1, n2, n3
-        real, allocatable, dimension(:, :, :) :: mt, maux, mcoh
+        integer :: i
+        real, allocatable, dimension(:, :, :) :: mt
         real :: reg_smoothx, reg_smoothy, reg_smoothz
-        type(andf_param) :: param
-        character(len=1024) :: file_aux, file_coh
         real :: tv_mu
         real :: tv_lambda1
         real :: tv_lambda2
@@ -163,9 +161,6 @@ contains
         real, allocatable, dimension(:, :, :) :: vp, vs, r
         real :: rmin, rmax
 
-        n1 = size(m, 1)
-        n2 = size(m, 2)
-        n3 = size(m, 3)
         mt = m
 
         call readpar_int(file_parameter, 'rankx', rank3, floor(nrank**0.33333333d0))
@@ -216,35 +211,6 @@ contains
 
                     if (rankid == 0) then
                         call warn(date_time_compact()//' >>>>>>>>>> TGpV regularization finished. ')
-                    end if
-
-                case ('structure')
-                    call readpar_xfloat(file_parameter, 'reg_andf_alpha', param%lambda1, 0.001, iter*1.0)
-                    call readpar_xfloat(file_parameter, 'reg_andf_beta', param%lambda2, 1.0, iter*1.0)
-                    call readpar_xfloat(file_parameter, 'reg_andf_gamma', param%lambda3, 1.0, iter*1.0)
-                    call readpar_xfloat(file_parameter, 'reg_andf_smoothx', param%smooth3, 2.0, iter*1.0)
-                    call readpar_xfloat(file_parameter, 'reg_andf_smoothy', param%smooth2, 2.0, iter*1.0)
-                    call readpar_xfloat(file_parameter, 'reg_andf_smoothz', param%smooth1, 8.0, iter*1.0)
-                    call readpar_xint(file_parameter, 'reg_andf_t', param%niter, 5, iter*1.0)
-                    call readpar_xfloat(file_parameter, 'reg_andf_sigma', param%sigma, 10.0, iter*1.0)
-                    call readpar_xfloat(file_parameter, 'reg_andf_powerm', param%powerm, 4.0, iter*1.0)
-                    call readpar_xstring(file_parameter, 'reg_andf_aux', file_aux, '', iter*1.0)
-                    call readpar_xstring(file_parameter, 'reg_andf_coh', file_coh, '', iter*1.0)
-                    if (file_aux /= '' .and. file_coh == '') then
-                        maux = load(file_aux, n1, n2, n3)
-                        mt = andf_filt_mpi(mt, param, aux=maux)
-                    else if (file_aux == '' .and. file_coh /= '') then
-                        mcoh = load(file_coh, n1, n2, n3)
-                        mt = andf_filt_mpi(mt, param, acoh=mcoh)
-                    else if (file_aux /= '' .and. file_coh /= '') then
-                        maux = load(file_aux, n1, n2, n3)
-                        mcoh = load(file_coh, n1, n2, n3)
-                        mt = andf_filt_mpi(mt, param, aux=maux, acoh=mcoh)
-                    else
-                        mt = andf_filt_mpi(mt, param)
-                    end if
-                    if (rankid == 0) then
-                        call warn(date_time_compact()//' >>>>>>>>>> Structure-oriented regularization finished. ')
                     end if
 
                 case ('vpvs_similarity')
@@ -322,222 +288,5 @@ contains
         end do
 
     end subroutine model_regularization
-
-    !
-    !> Apply regularization to model parameters
-    !
-    subroutine source_regularization
-
-        real, allocatable, dimension(:, :, :) :: sx, sy, sz, st0
-        real, allocatable, dimension(:, :, :) :: sxr, syr, szr
-        integer :: i, ic
-        type(hdbscan) :: p
-        integer, allocatable, dimension(:) :: unindex, sindex
-        integer :: nc
-        real, allocatable, dimension(:) :: pr1, pr2, pr3
-        character(len=32) :: fit_method
-        real :: fit_smooth
-        integer :: fit_order
-        real, allocatable, dimension(:, :, :) :: meq, f
-        integer :: dist, i1, i2, i3, l, isx, isy, isz, sp
-        real, allocatable, dimension(:) :: fx, fy, fz
-        logical, allocatable, dimension(:) :: fi
-        real :: d, dd
-        character(len=1024) :: ml_python, ml_src
-        character(len=1024) :: ml_model_infer, ml_model_refine
-        integer :: ml_niter_refine
-        real, allocatable, dimension(:) :: ml_xyz_weight
-        real :: ml_max_dist
-
-        if (any_in(['sx', 'sy', 'sz', 'st0'], model_name)) then
-
-            sx = zeros(nr_virtual, 1, 1)
-            if (.not. any(model_name == 'sx')) then
-                sx(:, 1, 1) = gmtr(1)%recr(:)%x
-            else
-                sx = get_meta_array_core(model_m, 'sx')
-            end if
-
-            sy = zeros(nr_virtual, 1, 1)
-            if (.not. any(model_name == 'sy')) then
-                sy(:, 1, 1) = gmtr(1)%recr(:)%y
-            else
-                sy = get_meta_array_core(model_m, 'sy')
-            end if
-
-            sz = zeros(nr_virtual, 1, 1)
-            if (.not. any(model_name == 'sz')) then
-                sz(:, 1, 1) = gmtr(1)%recr(:)%z
-            else
-                sz = get_meta_array_core(model_m, 'sz')
-            end if
-
-            st0 = zeros(nr_virtual, 1, 1)
-            if (.not. any(model_name == 'st0')) then
-                st0(:, 1, 1) = gmtr(1)%recr(:)%t0
-            else
-                st0 = get_meta_array_core(model_m, 'st0')
-            end if
-
-            ! Do clustering
-
-            ! Do fitting/filtering
-            sxr = sx
-            syr = sy
-            szr = sz
-            do i = 1, size(source_regularization_method)
-
-                select case(source_regularization_method(i))
-
-                    case('clustering-fit')
-
-                        ! Clustering
-                        p%data = zeros(nr_virtual, 3)
-                        p%data(:, 1) = szr(:, 1, 1)
-                        p%data(:, 2) = syr(:, 1, 1)
-                        p%data(:, 3) = sxr(:, 1, 1)
-                        call readpar_xint(file_parameter, 'clustering_fit_min_sample', p%min_samples, nint(0.25*nr_virtual), iter*1.0)
-                        call readpar_xint(file_parameter, 'clustering_fit_min_cluster_size', p%min_cluster_size, nint(0.25*nr_virtual), iter*1.0)
-                        call p%cluster
-
-                        ! Find unique labels
-                        unindex = sort(unique(p%labels))
-                        nc = size(unindex)
-
-                        ! ic = 1 -> label = 0 -> noisy data
-                        call readpar_xstring(file_parameter, 'clustering_fit_method', fit_method, 'polynomial', iter*1.0)
-                        call readpar_xfloat(file_parameter, 'clustering_fit_smooth', fit_smooth, 0.5, iter*1.0)
-                        call readpar_xint(file_parameter, 'clustering_fit_order', fit_order, 2, iter*1.0)
-
-                        do ic = 2, nc
-
-                            ! Select points associated with label_i
-                            sindex = pack(regspace(1, 1, p%n_points), mask=(p%labels==unindex(ic)))
-
-                            ! Fit the surface
-                            call fit_surface(p%data(sindex, 1), p%data(sindex, 2), p%data(sindex, 3), &
-                                pr1, pr2, pr3, method=fit_method, smooth=fit_smooth, order=fit_order)
-
-                            sxr(sindex, 1, 1) = pr3
-                            syr(sindex, 1, 1) = pr2
-                            szr(sindex, 1, 1) = pr1
-                            ! st0r(sindex, 1, 1) = mean(st0(sindex, 1, 1))
-
-                            call warn(date_time_compact()//' Source regularization for cluster '//num2str(ic)//' completed.')
-
-                        end do
-
-                    case ('ml')
-
-                        meq = zeros(nz, ny, nx)
-                        f = zeros(nz, ny, nx)
-
-                        call readpar_string(file_parameter, 'reg_ml_python', ml_python, 'python', required=.true.)
-                        call readpar_string(file_parameter, 'reg_ml_src', ml_src, '$HOME/src/latte/ml/main3.py', required=.true.)
-                        call readpar_string(file_parameter, 'reg_ml_model_infer', ml_model_infer, '$HOME/src/latte/ml/infer3.model', required=.true.)
-                        call readpar_int(file_parameter, 'reg_ml_niter_refine', ml_niter_refine, 3, required=.false.)
-                        call readpar_string(file_parameter, 'reg_ml_model_refine', ml_model_refine, '$HOME/src/latte/ml/refine3.model', required=.true.)
-                        call readpar_nfloat(file_parameter, 'reg_ml_xyz_weight', ml_xyz_weight, [1.0, 1.0, 1.0])
-                        call assert(size(ml_xyz_weight) == 3, ' <source_regularization> Error: size(ml_xyz_weight) must = 3')
-                        call readpar_xfloat(file_parameter, 'reg_ml_max_dist', ml_max_dist, float_huge, iter*1.0)
-
-                        if (rankid == 0) then
-
-                            ! ML fault detection
-                            dist = 3
-                            do l = 1, nr_virtual
-                                isx = nint((sxr(l, 1, 1) - ox)/dx + 1)
-                                isy = nint((syr(l, 1, 1) - oy)/dy + 1)
-                                isz = nint((szr(l, 1, 1) - oz)/dz + 1)
-                                do i3 = -2*dist - 1, 2*dist + 1
-                                    do i2 = -2*dist - 1, 2*dist + 1
-                                        do i1 = -2*dist - 1, 2*dist + 1
-                                            if (isz + i1 >= 1 .and. isz + i1 <= nz &
-                                                    .and. isy + i2 >= 1 .and. isy + i2 <= ny &
-                                                    .and. isx + i3 >= 1 .and. isx + i3 <= nx) then
-                                                meq(isz + i1, isy + i2, isx + i3) = &
-                                                    max(meq(isz + i1, isy + i2, isx + i3), exp(-0.3*(i1**2 + i2**2 + i3**2)))
-                                            end if
-                                        end do
-                                    end do
-                                end do
-                            end do
-
-                            call output_array(meq, dir_iter_model(iter)//'/source_image.bin')
-                            call execute_command_line(tidy(ml_python)//" "//tidy(ml_src) &
-                                    //' --n1='//num2str(nz)//' --n2='//num2str(ny)//' --n3='//num2str(nx) &
-                                    //' --model_infer='//tidy(ml_model_infer) &
-                                    //' --model_refine='//tidy(ml_model_refine) &
-                                    //' --niter='//num2str(ml_niter_refine) &
-                                    //' --input='//dir_iter_model(iter)//'/source_image.bin' &
-                                    //' --output='//dir_iter_model(iter)//'/source_image.bin')
-                            f = load(dir_iter_model(iter)//'/source_image.bin.fsem', nz, ny, nx)
-
-                        end if
-
-                        call mpibarrier
-
-                        call bcast_array(f)
-
-                        ! Move source location to nearest fault position
-                        fx = meshgrid([nz, ny, nx], [dz, dy, dx], [oz, oy, ox], dim=3)
-                        fy = meshgrid([nz, ny, nx], [dz, dy, dx], [oz, oy, ox], dim=2)
-                        fz = meshgrid([nz, ny, nx], [dz, dy, dx], [oz, oy, ox], dim=1)
-
-                        fi = falses(nx*ny*nz)
-                        l = 1
-                        do i3 = 1, nx
-                            do i2 = 1, ny
-                                do i1 = 1, nz
-                                    if (f(i1, i2, i3) >= 0.5) then
-                                        fi(l) = .true.
-                                    end if
-                                    l = l + 1
-                                end do
-                            end do
-                        end do
-
-                        fx = pack(fx, fi)
-                        fy = pack(fy, fi)
-                        fz = pack(fz, fi)
-                        do l = 1, nr_virtual
-                            d = float_huge
-                            do ic = 1, size(fx)
-                                dd = ml_xyz_weight(1)*(fx(ic) - sxr(l, 1, 1))**2 &
-                                    + ml_xyz_weight(2)*(fy(ic) - syr(l, 1, 1))**2 &
-                                    + ml_xyz_weight(3)*(fz(ic) - szr(l, 1, 1))**2
-                                if (dd < d) then
-                                    d = dd
-                                    sp = ic
-                                end if
-                            end do
-                            if (sqrt(d) <= ml_max_dist) then
-                                sxr(l, 1, 1) = fx(sp)
-                                syr(l, 1, 1) = fy(sp)
-                                szr(l, 1, 1) = fz(sp)
-                            end if
-                        end do
-
-                end select
-
-            end do
-
-            ! Assign back
-            call set_meta_array_core(model_reg, 'sx', sxr)
-            call set_meta_array_core(model_reg, 'sy', syr)
-            call set_meta_array_core(model_reg, 'sz', szr)
-
-            ! Output regularized model
-            if (rankid == 0) then
-                call output_array(get_meta_array_core(model_reg, 'sx'), dir_iter_model(iter)//'/reg_sx.bin')
-                call output_array(get_meta_array_core(model_reg, 'sy'), dir_iter_model(iter)//'/reg_sy.bin')
-                call output_array(get_meta_array_core(model_reg, 'sz'), dir_iter_model(iter)//'/reg_sz.bin')
-            end if
-
-        end if
-
-        call mpibarrier
-
-    end subroutine source_regularization
 
 end module regularization

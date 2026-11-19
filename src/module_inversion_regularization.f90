@@ -34,8 +34,8 @@
 !> reg_lambda_<name> when const_reg is true, and falls back to reg_scale or
 !> reg_lambda. A zero strength switches off the regularization of the parameter.
 !>
-!> In LATTE, the traveltime computation is fast, while the denoising (TGpV, and
-!> especially ML-based source regularization) can be slow, and it is rarely needed
+!> In LATTE, the traveltime computation is fast, while the denoising (e.g., TGpV)
+!> can be slow, and it is rarely needed
 !> in early iterations. Therefore, compute_regularization denoises only when the next
 !> iteration, which uses the result, has a positive strength. An iteration without an
 !> up-to-date mu (the first iteration of a run, or the first one after a zero strength)
@@ -58,21 +58,13 @@ module inversion_regularization
     use parameters
     use regularization
 
-#ifdef dim2
-#define model_dimension dimension(:, :)
-#endif
-
-#ifdef dim3
 #define model_dimension dimension(:, :, :)
-#endif
 
     implicit none
 
     ! Whether compute_regularization refreshed the regularized models (model_reg)
-    ! in the last iteration: for the medium parameters vp and vs, and for the
-    ! source positions sx, sy and sz
+    ! of the medium parameters vp and vs in the last iteration
     logical :: model_reg_ready = .false.
-    logical :: source_reg_ready = .false.
 
 contains
 
@@ -186,10 +178,8 @@ contains
         integer :: i
 
         do i = 1, nmodel
-            ! Only parameters whose regularized versions are up to date; no source
-            ! regularization method regularizes st0
-            if ((any(model_name(i) == ['vp', 'vs']) .and. model_reg_ready) &
-                    .or. (any(model_name(i) == ['sx', 'sy', 'sz']) .and. source_reg_ready)) then
+            ! Only the medium parameters, whose regularized versions are up to date
+            if (any(model_name(i) == ['vp', 'vs']) .and. model_reg_ready) then
                 call add_l2reg_single_parameter(model_reg(i)%array, model_m(i)%array, &
                     model_grad(i)%array, model_name(i))
             end if
@@ -208,7 +198,7 @@ contains
     !
     subroutine regularize_gradient
 
-        if (model_reg_ready .or. source_reg_ready) then
+        if (model_reg_ready) then
             call add_l2reg
         end if
 
@@ -238,23 +228,6 @@ contains
             end do
             if (model_reg_ready) then
                 call model_regularization
-            end if
-        end if
-
-        ! For location, regularize the source positions when sx, sy or sz
-        ! has a positive regularization strength in the next iteration
-        source_reg_ready = .false.
-        if (yn_regularize_source) then
-            do i = 1, nmodel
-                if (any(model_name(i) == ['sx', 'sy', 'sz'])) then
-                    if (regularization_strength(model_name(i), iter + 1) > 0) then
-                        source_reg_ready = .true.
-                        exit
-                    end if
-                end if
-            end do
-            if (source_reg_ready) then
-                call source_regularization
             end if
         end if
 
