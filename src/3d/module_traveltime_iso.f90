@@ -23,6 +23,7 @@ module traveltime_iso
 
     use libflit
     use parameters
+    use spherical
     use utility
     use omp_lib
 
@@ -34,6 +35,10 @@ module traveltime_iso
     logical, allocatable, dimension(:, :, :) :: unknown, recrflag
     ! Whether adjsrc holds point sources of the adjoint-state equation
     logical :: point_source = .false.
+    ! Offsets of the local (per-shot) grid within the global grid: local node
+    ! (i, j, k) is global node (i + ioff, j + joff, k + koff); the spherical
+    ! geometry arrays of module spherical are indexed by global nodes
+    integer :: ioff = 0, joff = 0, koff = 0
 
     private
     public :: forward_iso
@@ -166,11 +171,23 @@ contains
     !>      doi: 10.1016/j.jcp.2009.05.029
     !>
     !> I made modifications to these schemes for efficiency
+    !>
+    !> Spherical coordinates: the axes are longitude (i, eastward), geodetic
+    !> latitude (j, northward) and depth (k, downward). The eikonal equation
+    !> in the local orthonormal frame of east, north and down is
+    !>
+    !>     (dT/de)^2 + (dT/dn)^2 + (dT/dd)^2 = 1/v^2,
+    !>     dT/de = 1/(r cos(theta)) dT/dlambda, dT/dn = 1/r dT/dtheta, dT/dd = dT/dd,
+    !>
+    !> and the one-sided differences of the local solver use the arc length to
+    !> the upwind neighbour: h_lon = r_k cos(theta_j) dlambda toward i - 1 or
+    !> i + 1, r_k (theta_j - theta_j-1) toward j - 1, r_k (theta_j+1 - theta_j)
+    !> toward j + 1, and ddepth toward k - 1 or k + 1. px0, py0 and pz0 are the
+    !> east, north and down components of grad(T0).
     !
-    subroutine fast_sweep_forward(nx, ny, nz, nxd, nyd, nzd, dx, dy, dz, vp, t0, px0, py0, pz0, tau)
+    subroutine fast_sweep_forward(nx, ny, nz, nxd, nyd, nzd, vp, t0, px0, py0, pz0, tau)
 
         integer, intent(in) :: nx, ny, nz, nxd, nyd, nzd
-        double precision, intent(in) :: dx, dy, dz
         double precision, dimension(:, :, :), intent(in) :: vp, t0, px0, py0, pz0
         double precision, dimension(:, :, :), intent(inout) :: tau
 
@@ -179,6 +196,7 @@ contains
         integer :: level, jbeg, jend, kbeg, kend
         double precision :: txyz1, txyz2, txyz3, txyz4, txyz5, txyz6, txyz7, txyz8
         logical :: valid1, valid2, valid3, valid4, valid5, valid6, valid7, valid8
+        double precision :: hx, hym, hyp, hz
 
         if (nxd > 0) then
             nxbeg = 1
@@ -214,7 +232,7 @@ contains
             jend = ifelse(level <= ny, nybeg + (level - 1)*nyd, nyend)
 
             !$omp parallel do private(i, j, k, txyz1, txyz2, txyz3, txyz4, txyz5, txyz6, txyz7, txyz8, &
-                !$omp valid1, valid2, valid3, valid4, valid5, valid6, valid7, valid8) schedule(dynamic)
+                !$omp valid1, valid2, valid3, valid4, valid5, valid6, valid7, valid8, hx, hym, hyp, hz) schedule(dynamic)
             do k = kbeg, kend, nzd
                 do j = jbeg, jend, nyd
 
@@ -280,52 +298,64 @@ contains
                         valid8 = .false.
                     end if
 
+                    ! Arc lengths to the neighbours of this node
+                    hx = arc_lon(j + joff, k + koff)
+                    hym = 0.0d0
+                    hyp = 0.0d0
+                    if (j > 1) then
+                        hym = arc_lat(j + joff - 1, j + joff, k + koff)
+                    end if
+                    if (j < ny) then
+                        hyp = arc_lat(j + joff, j + joff + 1, k + koff)
+                    end if
+                    hz = sph_ddepth
+
                     if (valid1) then
                         txyz1 = local_solver_3d(t0(i, j, k), t0(i - 1, j, k), t0(i, j - 1, k), t0(i, j, k - 1), &
                             px0(i, j, k), py0(i, j, k), pz0(i, j, k), tau(i - 1, j, k), tau(i, j - 1, k), tau(i, j, k - 1), &
-                            dx, dy, dz, +1, +1, +1, vp(i, j, k))
+                            hx, hym, hz, +1, +1, +1, vp(i, j, k))
                     end if
 
                     if (valid2) then
                         txyz2 = local_solver_3d(t0(i, j, k), t0(i + 1, j, k), t0(i, j - 1, k), t0(i, j, k - 1), &
                             px0(i, j, k), py0(i, j, k), pz0(i, j, k), tau(i + 1, j, k), tau(i, j - 1, k), tau(i, j, k - 1), &
-                            dx, dy, dz, -1, +1, +1, vp(i, j, k))
+                            hx, hym, hz, -1, +1, +1, vp(i, j, k))
                     end if
 
                     if (valid3) then
                         txyz3 = local_solver_3d(t0(i, j, k), t0(i + 1, j, k), t0(i, j + 1, k), t0(i, j, k - 1), &
                             px0(i, j, k), py0(i, j, k), pz0(i, j, k), tau(i + 1, j, k), tau(i, j + 1, k), tau(i, j, k - 1), &
-                            dx, dy, dz, -1, -1, +1, vp(i, j, k))
+                            hx, hyp, hz, -1, -1, +1, vp(i, j, k))
                     end if
 
                     if (valid4) then
                         txyz4 = local_solver_3d(t0(i, j, k), t0(i - 1, j, k), t0(i, j + 1, k), t0(i, j, k - 1), &
                             px0(i, j, k), py0(i, j, k), pz0(i, j, k), tau(i - 1, j, k), tau(i, j + 1, k), tau(i, j, k - 1), &
-                            dx, dy, dz, +1, -1, +1, vp(i, j, k))
+                            hx, hyp, hz, +1, -1, +1, vp(i, j, k))
                     end if
 
                     if (valid5) then
                         txyz5 = local_solver_3d(t0(i, j, k), t0(i - 1, j, k), t0(i, j - 1, k), t0(i, j, k + 1), &
                             px0(i, j, k), py0(i, j, k), pz0(i, j, k), tau(i - 1, j, k), tau(i, j - 1, k), tau(i, j, k + 1), &
-                            dx, dy, dz, +1, +1, -1, vp(i, j, k))
+                            hx, hym, hz, +1, +1, -1, vp(i, j, k))
                     end if
 
                     if (valid6) then
                         txyz6 = local_solver_3d(t0(i, j, k), t0(i + 1, j, k), t0(i, j - 1, k), t0(i, j, k + 1), &
                             px0(i, j, k), py0(i, j, k), pz0(i, j, k), tau(i + 1, j, k), tau(i, j - 1, k), tau(i, j, k + 1), &
-                            dx, dy, dz, -1, +1, -1, vp(i, j, k))
+                            hx, hym, hz, -1, +1, -1, vp(i, j, k))
                     end if
 
                     if (valid7) then
                         txyz7 = local_solver_3d(t0(i, j, k), t0(i + 1, j, k), t0(i, j + 1, k), t0(i, j, k + 1), &
                             px0(i, j, k), py0(i, j, k), pz0(i, j, k), tau(i + 1, j, k), tau(i, j + 1, k), tau(i, j, k + 1), &
-                            dx, dy, dz, -1, -1, -1, vp(i, j, k))
+                            hx, hyp, hz, -1, -1, -1, vp(i, j, k))
                     end if
 
                     if (valid8) then
                         txyz8 = local_solver_3d(t0(i, j, k), t0(i - 1, j, k), t0(i, j + 1, k), t0(i, j, k + 1), &
                             px0(i, j, k), py0(i, j, k), pz0(i, j, k), tau(i - 1, j, k), tau(i, j + 1, k), tau(i, j, k + 1), &
-                            dx, dy, dz, +1, -1, -1, vp(i, j, k))
+                            hx, hyp, hz, +1, -1, -1, vp(i, j, k))
                     end if
 
                     tau(i, j, k) = min(tau(i, j, k), txyz1, txyz2, txyz3, txyz4, txyz5, txyz6, txyz7, txyz8)
@@ -501,6 +531,15 @@ contains
     !> grid point the analytic time from the source point that arrives
     !> first, t0 = min_l (|x - s_l|/v_l + t0_l), and its derivatives, into
     !> the module arrays t0, pdxt0, pdyt0, pdzt0.
+    !>
+    !> Spherical coordinates: x and s_l are Earth-centred Cartesian positions,
+    !> so |x - s_l| is the exact straight-line distance and t0 is the exact
+    !> traveltime of a homogeneous sphere of velocity v_l. pdxt0, pdyt0 and
+    !> pdzt0 are the components of grad(t0) = (x - s_l)/(v_l |x - s_l|) along
+    !> the local east, north and down unit vectors of the grid node. The
+    !> binning below works on the Earth-centred positions, and the distance
+    !> from a node to a bin's bounding box is still a lower bound of its
+    !> distance to any point of the bin, so the pruning stays exact.
     !
     !> The minimum used to re-interpolate every source point's velocity at
     !> every grid point and fill four ns-long arrays per grid point:
@@ -527,11 +566,13 @@ contains
 
         ! Up to this many source points, all are evaluated at every grid point
         integer, parameter :: background_direct = 16
-        double precision, allocatable, dimension(:) :: sx, sy, sz, sv, st, gx, gy, gz
+        ! sx, sy, sz: Earth-centred Cartesian positions of the source points
+        double precision, allocatable, dimension(:) :: sx, sy, sz, sv, st
         double precision, allocatable, dimension(:) :: bxl, bxh, byl, byh, bzl, bzh, bvmax, btmin
         integer, allocatable, dimension(:) :: member, bin_of, bin_count, bin_start, order, bfirst, blast
         integer :: ns, nb, nbin, nbx, nby, nbz, npos, i, j, k, l, m, b, h, win, prev, first
         double precision :: ex, ey, ez, cell, best, tval, lb, lbmin, tol
+        double precision, dimension(1:3) :: xs
 
         t0 = zeros(nx, ny, nz) + huge_value
         pdxt0 = zeros(nx, ny, nz)
@@ -546,12 +587,13 @@ contains
         end if
         member = pack([(l, l = 1, geom%ns)], source_inside)
         allocate (sx(1:ns), sy(1:ns), sz(1:ns), sv(1:ns), st(1:ns))
-        !$omp parallel do private(m, l)
+        !$omp parallel do private(m, l, xs)
         do m = 1, ns
             l = member(m)
-            sx(m) = geom%srcr(l)%x
-            sy(m) = geom%srcr(l)%y
-            sz(m) = geom%srcr(l)%z
+            xs = lonlatdepth_to_ecef(dble(geom%srcr(l)%x), dble(geom%srcr(l)%y), dble(geom%srcr(l)%z))
+            sx(m) = xs(1)
+            sy(m) = xs(2)
+            sz(m) = xs(3)
             ! Linear interpolation to get velocity at the source position
             sv(m) = get_point_value_inside(dble([geom%srcr(l)%x, geom%srcr(l)%y, geom%srcr(l)%z]), &
                 [nx, ny, nz], [ox, oy, oz], [dx, dy, dz], vp)
@@ -566,17 +608,6 @@ contains
             !                dsz = (k - isz)*dz
         end do
         !$omp end parallel do
-
-        allocate (gx(1:nx), gy(1:ny), gz(1:nz))
-        do i = 1, nx
-            gx(i) = ox + (i - 1)*dx
-        end do
-        do j = 1, ny
-            gy(j) = oy + (j - 1)*dy
-        end do
-        do k = 1, nz
-            gz(k) = oz + (k - 1)*dz
-        end do
 
         if (ns <= background_direct) then
 
@@ -738,48 +769,57 @@ contains
         ! contained procedure would see the original i, j, k through host
         ! association, not the thread's private copies
 
-        !> The time from source point m to grid point (i, j, k), as the
-        !> original loop computed it
+        !> The time from source point m to the local grid point (i, j, k)
         double precision function source_time(m, i, j, k)
             integer, intent(in) :: m, i, j, k
-            double precision :: dsx, dsy, dsz
-            dsx = gx(i) - sx(m)
-            dsy = gy(j) - sy(m)
-            dsz = gz(k) - sz(m)
-            source_time = sqrt(dsx**2 + dsy**2 + dsz**2)/sv(m)
+            double precision, dimension(1:3) :: xn
+            xn = node_ecef(i + ioff, j + joff, k + koff)
+            source_time = sqrt((xn(1) - sx(m))**2 + (xn(2) - sy(m))**2 + (xn(3) - sz(m))**2)/sv(m)
             source_time = source_time + st(m)
         end function source_time
 
-        !> A lower bound of the time from any source point of bin b
+        !> A lower bound of the time from any source point of bin b: the
+        !> distance from the node to the bin's box over the fastest velocity
+        !> of the bin, plus its earliest start time
         double precision function bin_bound(b, i, j, k)
             integer, intent(in) :: b, i, j, k
+            double precision, dimension(1:3) :: xn
             double precision :: cx, cy, cz
-            cx = max(bxl(b) - gx(i), 0.0d0, gx(i) - bxh(b))
-            cy = max(byl(b) - gy(j), 0.0d0, gy(j) - byh(b))
-            cz = max(bzl(b) - gz(k), 0.0d0, gz(k) - bzh(b))
+            xn = node_ecef(i + ioff, j + joff, k + koff)
+            cx = max(bxl(b) - xn(1), 0.0d0, xn(1) - bxh(b))
+            cy = max(byl(b) - xn(2), 0.0d0, xn(2) - byh(b))
+            cz = max(bzl(b) - xn(3), 0.0d0, xn(3) - bzh(b))
             bin_bound = sqrt(cx**2 + cy**2 + cz**2)/bvmax(b) + btmin(b)
         end function bin_bound
 
-        !> The winner's time and derivatives at (i, j, k), as the original
-        !> loop computed them
+        !> The winner's time at the local grid point (i, j, k), and the east,
+        !> north and down components of its gradient
         subroutine set_background(m, i, j, k)
             integer, intent(in) :: m, i, j, k
-            double precision :: dsx, dsy, dsz, t1
+            double precision, dimension(1:3) :: xn, ds, ue, un, ud
+            double precision :: dist, t1
+            integer :: ig, jg
             if (m == 0) then
                 return
             end if
-            dsx = gx(i) - sx(m)
-            dsy = gy(j) - sy(m)
-            dsz = gz(k) - sz(m)
-            t1 = sqrt(dsx**2 + dsy**2 + dsz**2)/sv(m)
+            ig = i + ioff
+            jg = j + joff
+            xn = node_ecef(ig, jg, k + koff)
+            ds = xn - [sx(m), sy(m), sz(m)]
+            dist = norm2(ds)
+            t1 = dist/sv(m)
             if (t1 == 0) then
                 pdxt0(i, j, k) = 0
                 pdyt0(i, j, k) = 0
                 pdzt0(i, j, k) = 0
             else
-                pdxt0(i, j, k) = dsx/sv(m)**2/t1
-                pdyt0(i, j, k) = dsy/sv(m)**2/t1
-                pdzt0(i, j, k) = dsz/sv(m)**2/t1
+                ! Local unit vectors of the node: east, north and down
+                ue = [-sph_sinlon(ig), sph_coslon(ig), 0.0d0]
+                un = [-sph_sinlat(jg)*sph_coslon(ig), -sph_sinlat(jg)*sph_sinlon(ig), sph_coslat(jg)]
+                ud = -[sph_coslat(jg)*sph_coslon(ig), sph_coslat(jg)*sph_sinlon(ig), sph_sinlat(jg)]
+                pdxt0(i, j, k) = dot_product(ds, ue)/(sv(m)*dist)
+                pdyt0(i, j, k) = dot_product(ds, un)/(sv(m)*dist)
+                pdzt0(i, j, k) = dot_product(ds, ud)/(sv(m)*dist)
             end if
             t0(i, j, k) = t1 + st(m)
         end subroutine set_background
@@ -840,6 +880,27 @@ contains
     end subroutine linear_weights
 
     !
+    !> Set the offsets ioff, joff, koff of a per-shot grid of nx x ny x nz
+    !> nodes whose first node lies at o = (lon, lat, depth) within the global
+    !> grid of module spherical
+    !
+    subroutine set_grid_offsets(o, nx, ny, nz)
+
+        real, dimension(1:3), intent(in) :: o
+        integer, intent(in) :: nx, ny, nz
+
+        ioff = nint((dble(o(1)) - sph_olon)/sph_dlon)
+        joff = nint((dble(o(2)) - sph_olat)/sph_dlat)
+        koff = nint((dble(o(3)) - sph_odepth)/sph_ddepth)
+
+        call assert(ioff >= 0 .and. ioff + nx <= sph_nlon .and. &
+            joff >= 0 .and. joff + ny <= sph_nlat .and. &
+            koff >= 0 .and. koff + nz <= sph_ndepth, &
+            ' <set_grid_offsets> Error: the shot grid lies outside the global grid')
+
+    end subroutine set_grid_offsets
+
+    !
     !> Fast sweeping factorized eikonal solver
     !
     subroutine forward_iso(v, d, o, geom, t, trec)
@@ -853,7 +914,8 @@ contains
         double precision, allocatable, dimension(:, :, :) :: tt, tt_prev, vp
         double precision :: dx, dy, dz, ox, oy, oz
         integer :: nx, ny, nz, niter, i, j, k, l, isx, isy, isz, irx, iry, irz, itx, ity, itz
-        double precision :: ttdiff, vsource, dsx, dsy, dsz
+        double precision :: ttdiff, vsource
+        double precision, dimension(1:3) :: xr, xs
         integer :: sw
         integer(kind=8) :: key
         integer(kind=8), allocatable, dimension(:) :: cellkey
@@ -871,6 +933,10 @@ contains
         nx = size(vp, 1)
         ny = size(vp, 2)
         nz = size(vp, 3)
+
+        ! Position of this (per-shot) grid within the global grid, for the
+        ! spherical geometry arrays
+        call set_grid_offsets(o, nx, ny, nz)
 
         ! Check if sources are at zero-velocity points
         source_inside = falses(geom%ns)
@@ -944,14 +1010,14 @@ contains
         do while (ttdiff >= sweep_stop_threshold .and. niter < sweep_niter_max)
 
             tt_prev = tt
-            call fast_sweep_forward(nx, ny, nz, 1, 1, 1, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt)
-            call fast_sweep_forward(nx, ny, nz, 1, 1, -1, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt)
-            call fast_sweep_forward(nx, ny, nz, 1, -1, 1, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt)
-            call fast_sweep_forward(nx, ny, nz, 1, -1, -1, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt)
-            call fast_sweep_forward(nx, ny, nz, -1, 1, 1, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt)
-            call fast_sweep_forward(nx, ny, nz, -1, 1, -1, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt)
-            call fast_sweep_forward(nx, ny, nz, -1, -1, 1, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt)
-            call fast_sweep_forward(nx, ny, nz, -1, -1, -1, dx, dy, dz, vp, t0, pdxt0, pdyt0, pdzt0, tt)
+            call fast_sweep_forward(nx, ny, nz, 1, 1, 1, vp, t0, pdxt0, pdyt0, pdzt0, tt)
+            call fast_sweep_forward(nx, ny, nz, 1, 1, -1, vp, t0, pdxt0, pdyt0, pdzt0, tt)
+            call fast_sweep_forward(nx, ny, nz, 1, -1, 1, vp, t0, pdxt0, pdyt0, pdzt0, tt)
+            call fast_sweep_forward(nx, ny, nz, 1, -1, -1, vp, t0, pdxt0, pdyt0, pdzt0, tt)
+            call fast_sweep_forward(nx, ny, nz, -1, 1, 1, vp, t0, pdxt0, pdyt0, pdzt0, tt)
+            call fast_sweep_forward(nx, ny, nz, -1, 1, -1, vp, t0, pdxt0, pdyt0, pdzt0, tt)
+            call fast_sweep_forward(nx, ny, nz, -1, -1, 1, vp, t0, pdxt0, pdyt0, pdzt0, tt)
+            call fast_sweep_forward(nx, ny, nz, -1, -1, -1, vp, t0, pdxt0, pdyt0, pdzt0, tt)
 
             ttdiff = mean(abs(tt - tt_prev))
             niter = niter + 1
@@ -985,7 +1051,7 @@ contains
             end if
         end do
         !$omp end parallel do
-        !$omp parallel do private(i, irx, iry, irz, l, key, vsource, dsx, dsy, dsz)
+        !$omp parallel do private(i, irx, iry, irz, l, key, vsource, xr, xs)
         do i = 1, geom%nr
             if (receiver_inside(i)) then
 
@@ -1000,10 +1066,10 @@ contains
                     if (cellkey(l) == key) then
                         vsource = get_point_value_inside(dble([geom%srcr(l)%x, geom%srcr(l)%y, geom%srcr(l)%z]), &
                             [nx, ny, nz], [ox, oy, oz], [dx, dy, dz], vp)
-                        dsx = geom%recr(i)%x - geom%srcr(l)%x
-                        dsy = geom%recr(i)%y - geom%srcr(l)%y
-                        dsz = geom%recr(i)%z - geom%srcr(l)%z
-                        trec(i, 1) = sqrt(dsx**2 + dsy**2 + dsz**2)/vsource + geom%srcr(l)%t0
+                        ! Straight-line distance between the Earth-centred positions
+                        xr = lonlatdepth_to_ecef(dble(geom%recr(i)%x), dble(geom%recr(i)%y), dble(geom%recr(i)%z))
+                        xs = lonlatdepth_to_ecef(dble(geom%srcr(l)%x), dble(geom%srcr(l)%y), dble(geom%srcr(l)%z))
+                        trec(i, 1) = norm2(xr - xs)/vsource + geom%srcr(l)%t0
                         exit
                     end if
                 end do
