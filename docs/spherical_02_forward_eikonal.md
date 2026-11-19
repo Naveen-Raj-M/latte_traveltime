@@ -147,6 +147,8 @@ for its source coordinates.
 
 ## Verification
 
+The scripts of these tests are in `test/spherical/step2`; `test/spherical/README.md` explains how to run them. The main-branch comparison runs only when a main-branch `x_eikonal3` is given.
+
 All tests ran in a scratch directory with `x_eikonal3`.
 
 ### Homogeneous Earth

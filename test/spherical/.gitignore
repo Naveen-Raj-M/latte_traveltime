@@ -1,0 +1,6 @@
+# Work directories and build products of the spherical tests
+work*/
+step1/test_spherical
+*.mod
+*.o
+__pycache__/

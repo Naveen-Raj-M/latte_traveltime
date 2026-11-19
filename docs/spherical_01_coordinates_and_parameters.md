@@ -285,6 +285,8 @@ gradients and inversion are mathematically unchanged in this step.
 
 ## Verification
 
+The scripts of these tests are in `test/spherical/step1`; `test/spherical/README.md` explains how to run them.
+
 All tests ran in a scratch directory.
 
 A test program checked `module_spherical`:
