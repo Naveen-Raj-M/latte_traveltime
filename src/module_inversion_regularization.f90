@@ -150,7 +150,7 @@ contains
 
         ! Mask gradient again, with the mask that gradient processing applied to
         ! this parameter; source parameters are neither processed nor masked
-        if (.not. any(name == ['sx', 'sy', 'sz', 'st0'])) then
+        if (.not. any(name == [character(len=6) :: 'slon', 'slat', 'sdepth', 'st0'])) then
             if (uniform_processing) then
                 process_name = 'grad'
             else

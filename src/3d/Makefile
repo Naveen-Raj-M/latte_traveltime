@@ -26,6 +26,7 @@ moddir = $(HOME)/bin/obj/latte3
 
 # Dependencies
 common = \
+	module_spherical.o \
 	module_parameters.o \
 	module_vars.o \
 	module_utility.o \

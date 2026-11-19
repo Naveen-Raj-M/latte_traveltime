@@ -92,7 +92,7 @@ contains
 
                     end if
 
-                case ('sx', 'sy', 'sz', 'st0')
+                case ('slon', 'slat', 'sdepth', 'st0')
                     ! For source parameter update
 
                     w = zeros(nr_virtual, 1, 1)

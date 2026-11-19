@@ -240,11 +240,11 @@ contains
                     valstep = 0.1
                 case ('c', 'C')
                     valstep = 1.0e9
-                case ('sx')
+                case ('slon')
                     valstep = 0.1*(nx - 1)*dx
-                case ('sy')
+                case ('slat')
                     valstep = 0.1*(ny - 1)*dy
-                case ('sz')
+                case ('sdepth')
                     valstep = 0.1*(nz - 1)*dz
                 case ('st0')
                     valstep = 0.1

@@ -52,17 +52,17 @@ contains
 
         ! Set default values for real source parameters
         sx = zeros(nr_virtual, 1, 1)
-        if (.not. any(model_name == 'sx')) then
+        if (.not. any(model_name == 'slon')) then
             sx(:, 1, 1) = gmtr(shot_in_rank(rankid, 1))%recr(:)%x
         end if
 
         sy = zeros(nr_virtual, 1, 1)
-        if (.not. any(model_name == 'sy')) then
+        if (.not. any(model_name == 'slat')) then
             sy(:, 1, 1) = gmtr(shot_in_rank(rankid, 1))%recr(:)%y
         end if
 
         sz = zeros(nr_virtual, 1, 1)
-        if (.not. any(model_name == 'sz')) then
+        if (.not. any(model_name == 'sdepth')) then
             sz(:, 1, 1) = gmtr(shot_in_rank(rankid, 1))%recr(:)%z
         end if
 
@@ -77,11 +77,11 @@ contains
                     vp = model_m(i)%array
                 case ('vs')
                     vs = model_m(i)%array
-                case ('sx')
+                case ('slon')
                     sx = model_m(i)%array
-                case ('sy')
+                case ('slat')
                     sy = model_m(i)%array
-                case ('sz')
+                case ('sdepth')
                     sz = model_m(i)%array
                 case ('st0')
                     st0 = model_m(i)%array
@@ -93,11 +93,11 @@ contains
                     vp = model_aux(i)%array
                 case ('vs')
                     vs = model_aux(i)%array
-                case ('sx')
+                case ('slon')
                     sx = model_aux(i)%array
-                case ('sy')
+                case ('slat')
                     sy = model_aux(i)%array
-                case ('sz')
+                case ('sdepth')
                     sz = model_aux(i)%array
                 case ('st0')
                     st0 = model_aux(i)%array
@@ -118,13 +118,13 @@ contains
 
             ! Updated virtual receiver (real source) information
             do i = 1, gmtr(ishot)%nr
-                if (any(model_name == 'sx')) then
+                if (any(model_name == 'slon')) then
                     gmtr(ishot)%recr(i)%x = sx(i, 1, 1)
                 end if
-                if (any(model_name == 'sy')) then
+                if (any(model_name == 'slat')) then
                     gmtr(ishot)%recr(i)%y = sy(i, 1, 1)
                 end if
-                if (any(model_name == 'sz')) then
+                if (any(model_name == 'sdepth')) then
                     gmtr(ishot)%recr(i)%z = sz(i, 1, 1)
                 end if
                 if (any(model_name == 'st0')) then
@@ -252,7 +252,7 @@ contains
                             end if
 
                             ! Update source parameters
-                        else if (model_name(i) == 'sx') then
+                        else if (model_name(i) == 'slon') then
                             ! grad_sx = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂x, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -265,7 +265,7 @@ contains
                             end do
                             !$omp end parallel do
 
-                        else if (model_name(i) == 'sy') then
+                        else if (model_name(i) == 'slat') then
                             ! grad_sy = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂y, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -278,7 +278,7 @@ contains
                             end do
                             !$omp end parallel do
 
-                        else if (model_name(i) == 'sz') then
+                        else if (model_name(i) == 'sdepth') then
                             ! grad_sz = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂z, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -395,7 +395,7 @@ contains
                             end if
 
                             ! Update source parameters
-                        else if (model_name(i) == 'sx') then
+                        else if (model_name(i) == 'slon') then
                             ! grad_sx = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂x, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -410,7 +410,7 @@ contains
                             end do
                             !$omp end parallel do
 
-                        else if (model_name(i) == 'sy') then
+                        else if (model_name(i) == 'slat') then
                             ! grad_sy = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂y, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -425,7 +425,7 @@ contains
                             end do
                             !$omp end parallel do
 
-                        else if (model_name(i) == 'sz') then
+                        else if (model_name(i) == 'sdepth') then
                             ! grad_sz = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂z, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -522,17 +522,17 @@ contains
 
         ! Set default values for real source parameters
         sx = zeros(nr_virtual, 1, 1)
-        if (.not. any(model_name == 'sx')) then
+        if (.not. any(model_name == 'slon')) then
             sx(:, 1, 1) = gmtr(shot_in_rank(rankid, 1))%recr(:)%x
         end if
 
         sy = zeros(nr_virtual, 1, 1)
-        if (.not. any(model_name == 'sy')) then
+        if (.not. any(model_name == 'slat')) then
             sy(:, 1, 1) = gmtr(shot_in_rank(rankid, 1))%recr(:)%y
         end if
 
         sz = zeros(nr_virtual, 1, 1)
-        if (.not. any(model_name == 'sz')) then
+        if (.not. any(model_name == 'sdepth')) then
             sz(:, 1, 1) = gmtr(shot_in_rank(rankid, 1))%recr(:)%z
         end if
 
@@ -547,11 +547,11 @@ contains
                     vp = model_m(i)%array
                 case ('vs')
                     vs = model_m(i)%array
-                case ('sx')
+                case ('slon')
                     sx = model_m(i)%array
-                case ('sy')
+                case ('slat')
                     sy = model_m(i)%array
-                case ('sz')
+                case ('sdepth')
                     sz = model_m(i)%array
                 case ('st0')
                     st0 = model_m(i)%array
@@ -563,11 +563,11 @@ contains
                     vp = model_aux(i)%array
                 case ('vs')
                     vs = model_aux(i)%array
-                case ('sx')
+                case ('slon')
                     sx = model_aux(i)%array
-                case ('sy')
+                case ('slat')
                     sy = model_aux(i)%array
-                case ('sz')
+                case ('sdepth')
                     sz = model_aux(i)%array
                 case ('st0')
                     st0 = model_aux(i)%array
@@ -599,13 +599,13 @@ contains
 
             ! Updated virtual receiver (real source) information
             do i = 1, gmtr(ishot)%nr
-                if (any(model_name == 'sx')) then
+                if (any(model_name == 'slon')) then
                     gmtr(ishot)%recr(i)%x = sx(i, 1, 1)
                 end if
-                if (any(model_name == 'sy')) then
+                if (any(model_name == 'slat')) then
                     gmtr(ishot)%recr(i)%y = sy(i, 1, 1)
                 end if
-                if (any(model_name == 'sz')) then
+                if (any(model_name == 'sdepth')) then
                     gmtr(ishot)%recr(i)%z = sz(i, 1, 1)
                 end if
                 if (any(model_name == 'st0')) then
@@ -798,7 +798,7 @@ contains
                             end if
 
                             ! Update source parameters
-                        else if (model_name(i) == 'sx') then
+                        else if (model_name(i) == 'slon') then
                             ! grad_sx = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂x, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -811,7 +811,7 @@ contains
                             end do
                             !$omp end parallel do
 
-                        else if (model_name(i) == 'sy') then
+                        else if (model_name(i) == 'slat') then
                             ! grad_sy = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂y, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -824,7 +824,7 @@ contains
                             end do
                             !$omp end parallel do
 
-                        else if (model_name(i) == 'sz') then
+                        else if (model_name(i) == 'sdepth') then
                             ! grad_sz = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂z, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -944,7 +944,7 @@ contains
                             end if
 
                             ! Update source parameters
-                        else if (model_name(i) == 'sx') then
+                        else if (model_name(i) == 'slon') then
                             ! grad_sx = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂x, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -959,7 +959,7 @@ contains
                             end do
                             !$omp end parallel do
 
-                        else if (model_name(i) == 'sy') then
+                        else if (model_name(i) == 'slat') then
                             ! grad_sy = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂y, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)
@@ -974,7 +974,7 @@ contains
                             end do
                             !$omp end parallel do
 
-                        else if (model_name(i) == 'sz') then
+                        else if (model_name(i) == 'sdepth') then
                             ! grad_sz = (t_syn - (t_obs - t_0))*δ(x - x_vr)*∂T_syn/∂z, is a scalar value at each virtual receiver
 
                             !$omp parallel do private(j, irx, iry, irz, dxt, dyt, dzt)

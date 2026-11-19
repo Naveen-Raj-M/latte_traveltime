@@ -20,6 +20,7 @@
 module parameters
 
     use libflit
+    use spherical
 
     implicit none
 
@@ -289,13 +290,23 @@ contains
 
         call bcast(file_parameter)
 
+        ! Stop on parameters of the Cartesian code or of unsupported features
+        call check_spherical_parameter_file
+
+        ! Radius of the spherical Earth, in the length unit of the model
+        call readpar_double(file_parameter, 'earth_radius', earth_radius, 6371000.0d0)
+        call assert(earth_radius > 0, ' <read_parameters> Error: earth_radius must be > 0')
+        if (rankid == 0) then
+            call warn(' Earth radius = '//num2str(real(earth_radius), '(es)'))
+        end if
+
         ! which kind of medium
         call readpar_string(file_parameter, 'which_medium', which_medium, 'acoustic-iso')
         call readpar_float(file_parameter, 'min_vpvsratio', min_vpvsratio, 1.1)
         call readpar_float(file_parameter, 'max_vpvsratio', max_vpvsratio, 9.0)
-        call readpar_float(file_parameter, 'vpvsratio_smoothx', vpvsratio_smoothx, 0.0)
-        call readpar_float(file_parameter, 'vpvsratio_smoothy', vpvsratio_smoothy, 0.0)
-        call readpar_float(file_parameter, 'vpvsratio_smoothz', vpvsratio_smoothz, 0.0)
+        call readpar_float(file_parameter, 'vpvsratio_smooth_lon', vpvsratio_smoothx, 0.0)
+        call readpar_float(file_parameter, 'vpvsratio_smooth_lat', vpvsratio_smoothy, 0.0)
+        call readpar_float(file_parameter, 'vpvsratio_smooth_depth', vpvsratio_smoothz, 0.0)
 
         call readpar_float(file_parameter, 'misfit_threshold', misfit_threshold, float_huge)
 
@@ -318,18 +329,18 @@ contains
         call readpar_nint(file_parameter, 'src_exclude', src_exclude, [0])
         call readpar_int(file_parameter, 'sid_min', sid_min, 0)
         call readpar_int(file_parameter, 'sid_max', sid_max, int4_huge)
-        call readpar_float(file_parameter, 'sxmin', sxmin, -float_huge)
-        call readpar_float(file_parameter, 'sxmax', sxmax, +float_huge)
-        call readpar_float(file_parameter, 'symin', symin, -float_huge)
-        call readpar_float(file_parameter, 'symax', symax, +float_huge)
-        call readpar_float(file_parameter, 'szmin', szmin, -float_huge)
-        call readpar_float(file_parameter, 'szmax', szmax, +float_huge)
-        call readpar_float(file_parameter, 'rxmin', rxmin, -float_huge)
-        call readpar_float(file_parameter, 'rxmax', rxmax, +float_huge)
-        call readpar_float(file_parameter, 'rymin', rymin, -float_huge)
-        call readpar_float(file_parameter, 'rymax', rymax, +float_huge)
-        call readpar_float(file_parameter, 'rzmin', rzmin, -float_huge)
-        call readpar_float(file_parameter, 'rzmax', rzmax, +float_huge)
+        call readpar_float(file_parameter, 'slon_min', sxmin, -float_huge)
+        call readpar_float(file_parameter, 'slon_max', sxmax, +float_huge)
+        call readpar_float(file_parameter, 'slat_min', symin, -float_huge)
+        call readpar_float(file_parameter, 'slat_max', symax, +float_huge)
+        call readpar_float(file_parameter, 'sdepth_min', szmin, -float_huge)
+        call readpar_float(file_parameter, 'sdepth_max', szmax, +float_huge)
+        call readpar_float(file_parameter, 'rlon_min', rxmin, -float_huge)
+        call readpar_float(file_parameter, 'rlon_max', rxmax, +float_huge)
+        call readpar_float(file_parameter, 'rlat_min', rymin, -float_huge)
+        call readpar_float(file_parameter, 'rlat_max', rymax, +float_huge)
+        call readpar_float(file_parameter, 'rdepth_min', rzmin, -float_huge)
+        call readpar_float(file_parameter, 'rdepth_max', rzmax, +float_huge)
         call readpar_logical(file_parameter, 'yn_exchange_sr', yn_exchange_sr, ifelse(which_program == 'tloc', .true., .false.))
 
         call readpar_string(file_parameter, 'dir_working', dir_working, './test')
@@ -347,15 +358,15 @@ contains
         call assert(any_in([misfit_type], ['absolute-difference', 'ad', 'double-difference', 'dd']), &
             ' <read_parameter> Error: misfit_type must be one of absolute-difference, ad, double-difference, dd')
 
-        call readpar_logical(file_parameter, 'yn_adpx', yn_adpx, .false.)
-        call readpar_logical(file_parameter, 'yn_adpy', yn_adpy, .false.)
-        call readpar_logical(file_parameter, 'yn_adpz', yn_adpz, .false.)
-        call readpar_float(file_parameter, 'adp_extrax', adpextrax, 0.0)
-        call readpar_float(file_parameter, 'adp_extray', adpextray, 0.0)
-        call readpar_float(file_parameter, 'adp_extraz', adpextraz, 0.0)
-        call readpar_float(file_parameter, 'adp_taperx', adptaperx, 0.0)
-        call readpar_float(file_parameter, 'adp_tapery', adptapery, 0.0)
-        call readpar_float(file_parameter, 'adp_taperz', adptaperz, 0.0)
+        call readpar_logical(file_parameter, 'yn_adp_lon', yn_adpx, .false.)
+        call readpar_logical(file_parameter, 'yn_adp_lat', yn_adpy, .false.)
+        call readpar_logical(file_parameter, 'yn_adp_depth', yn_adpz, .false.)
+        call readpar_float(file_parameter, 'adp_extra_lon', adpextrax, 0.0)
+        call readpar_float(file_parameter, 'adp_extra_lat', adpextray, 0.0)
+        call readpar_float(file_parameter, 'adp_extra_depth', adpextraz, 0.0)
+        call readpar_float(file_parameter, 'adp_taper_lon', adptaperx, 0.0)
+        call readpar_float(file_parameter, 'adp_taper_lat', adptapery, 0.0)
+        call readpar_float(file_parameter, 'adp_taper_depth', adptaperz, 0.0)
 
         call readpar_string(file_parameter, 'step_size_method', step_size_method, 'linear')
         call readpar_logical(file_parameter, 'yn_precond', yn_precond, .true.)
@@ -454,15 +465,15 @@ contains
         real :: valmin, valmax
 
         do i = 1, nmodel
-            if (any(model_name(i) == ['sx', 'sy', 'sz', 'st0'])) then
+            if (any(model_name(i) == [character(len=6) :: 'slon', 'slat', 'sdepth', 'st0'])) then
                 select case (model_name(i))
-                    case ('sx')
+                    case ('slon')
                         valmin = ox
                         valmax = ox + (nx - 1)*dx
-                    case ('sy')
+                    case ('slat')
                         valmin = oy
                         valmax = oy + (ny - 1)*dy
-                    case ('sz')
+                    case ('sdepth')
                         valmin = oz
                         valmax = oz + (nz - 1)*dz
                     case ('st0')
@@ -491,6 +502,7 @@ contains
         character(len=512) :: geom_line
         real :: wp, ws
         integer :: ios5
+        double precision, dimension(1:3) :: xc, xr
 
         if (rankid == 0) then
             call warn(date_time_compact()//' Loading geometry... ')
@@ -551,11 +563,6 @@ contains
 
             close(4)
 
-            if (ny == 1) then
-                gmtr(i)%srcr(:)%y = 0.5*(ymin + ymax)
-                gmtr(i)%recr(:)%y = 0.5*(ymin + ymax)
-            end if
-
             if ((mod(i, max(nint(ns/10.0), 1)) == 0 .or. i == ns .or. i == 1) .and. rankid == 0) then
                 call warn(date_time_compact()//' Loading geometry '//num2str(i)//' of '//num2str(ns))
             end if
@@ -597,14 +604,21 @@ contains
                 end if
             end if
 
+            ! Centroid of the source points of this shot, averaged in
+            ! Earth-centred Cartesian coordinates
+            xc = 0.0d0
+            do j = 1, gmtr(i)%ns
+                xc = xc + lonlatdepth_to_ecef(dble(gmtr(i)%srcr(j)%x), dble(gmtr(i)%srcr(j)%y), dble(gmtr(i)%srcr(j)%z))
+            end do
+            xc = xc/max(gmtr(i)%ns, 1)
+
             ! Check receiver
             l = 0
             do j = 1, gmtr(i)%nr
-                ! Compute absolute offset
-                gmtr(i)%recr(j)%aoff = sqrt( &
-                    (gmtr(i)%recr(j)%x - mean(gmtr(i)%srcr(:)%x))**2 &
-                    + (gmtr(i)%recr(j)%y - mean(gmtr(i)%srcr(:)%y))**2 &
-                    + (gmtr(i)%recr(j)%z - mean(gmtr(i)%srcr(:)%z))**2)
+                ! Absolute offset: the straight-line distance from the receiver
+                ! to the centroid of the source points
+                xr = lonlatdepth_to_ecef(dble(gmtr(i)%recr(j)%x), dble(gmtr(i)%recr(j)%y), dble(gmtr(i)%recr(j)%z))
+                gmtr(i)%recr(j)%aoff = real(norm2(xr - xc))
 
                 ! Check if receiver in the range
                 if ( &
@@ -737,37 +751,37 @@ contains
     subroutine set_regular_space
 
         ! Original model dimensions
-        call readpar_int(file_parameter, 'nx', nx0, 0, required=.true.)
-        call readpar_int(file_parameter, 'ny', ny0, 1)
-        call readpar_int(file_parameter, 'nz', nz0, 0, required=.true.)
-        call readpar_float(file_parameter, 'dx', dx0, 1.0, required=.true.)
-        call readpar_float(file_parameter, 'dy', dy0, 1.0)
-        call readpar_float(file_parameter, 'dz', dz0, 1.0, required=.true.)
-        call readpar_float(file_parameter, 'ox', ox0, 0.0)
-        call readpar_float(file_parameter, 'oy', oy0, 0.0)
-        call readpar_float(file_parameter, 'oz', oz0, 0.0)
+        call readpar_int(file_parameter, 'nlon', nx0, 0, required=.true.)
+        call readpar_int(file_parameter, 'nlat', ny0, 0, required=.true.)
+        call readpar_int(file_parameter, 'ndepth', nz0, 0, required=.true.)
+        call readpar_float(file_parameter, 'dlon', dx0, 1.0, required=.true.)
+        call readpar_float(file_parameter, 'dlat', dy0, 1.0, required=.true.)
+        call readpar_float(file_parameter, 'ddepth', dz0, 1.0, required=.true.)
+        call readpar_float(file_parameter, 'olon', ox0, 0.0, required=.true.)
+        call readpar_float(file_parameter, 'olat', oy0, 0.0, required=.true.)
+        call readpar_float(file_parameter, 'odepth', oz0, 0.0)
 
         ! Target model dimensions
-        call readpar_int(file_parameter, 'nnx', nx, nx0)
-        call readpar_int(file_parameter, 'nny', ny, ny0)
-        call readpar_int(file_parameter, 'nnz', nz, nz0)
-        call readpar_float(file_parameter, 'ddx', dx, dx0)
-        call readpar_float(file_parameter, 'ddy', dy, dy0)
-        call readpar_float(file_parameter, 'ddz', dz, dz0)
-        call readpar_float(file_parameter, 'oox', ox, ox0)
-        call readpar_float(file_parameter, 'ooy', oy, oy0)
-        call readpar_float(file_parameter, 'ooz', oz, oz0)
+        call readpar_int(file_parameter, 'nnlon', nx, nx0)
+        call readpar_int(file_parameter, 'nnlat', ny, ny0)
+        call readpar_int(file_parameter, 'nndepth', nz, nz0)
+        call readpar_float(file_parameter, 'ddlon', dx, dx0)
+        call readpar_float(file_parameter, 'ddlat', dy, dy0)
+        call readpar_float(file_parameter, 'dddepth', dz, dz0)
+        call readpar_float(file_parameter, 'oolon', ox, ox0)
+        call readpar_float(file_parameter, 'oolat', oy, oy0)
+        call readpar_float(file_parameter, 'oodepth', oz, oz0)
 
         ! Target model ranges
-        call readpar_float(file_parameter, 'xmin', xmin, ox)
-        call readpar_float(file_parameter, 'xmax', xmax, ox + (nx - 1)*dx)
-        call assert(xmax >= xmin, ' <set_regular_space> Error: xmax must >= xmin')
-        call readpar_float(file_parameter, 'ymin', ymin, oy)
-        call readpar_float(file_parameter, 'ymax', ymax, oy + (ny - 1)*dy)
-        call assert(ymax >= ymin, ' <set_regular_space> Error: ymax must >= ymin')
-        call readpar_float(file_parameter, 'zmin', zmin, oz)
-        call readpar_float(file_parameter, 'zmax', zmax, oz + (nz - 1)*dz)
-        call assert(zmax >= zmin, ' <set_regular_space> Error: zmax must >= zmin')
+        call readpar_float(file_parameter, 'lonmin', xmin, ox)
+        call readpar_float(file_parameter, 'lonmax', xmax, ox + (nx - 1)*dx)
+        call assert(xmax >= xmin, ' <set_regular_space> Error: lonmax must be >= lonmin')
+        call readpar_float(file_parameter, 'latmin', ymin, oy)
+        call readpar_float(file_parameter, 'latmax', ymax, oy + (ny - 1)*dy)
+        call assert(ymax >= ymin, ' <set_regular_space> Error: latmax must be >= latmin')
+        call readpar_float(file_parameter, 'depthmin', zmin, oz)
+        call readpar_float(file_parameter, 'depthmax', zmax, oz + (nz - 1)*dz)
+        call assert(zmax >= zmin, ' <set_regular_space> Error: depthmax must be >= depthmin')
 
         ! Target model origins
         ! Note: n# are computed with nint rather than ceiling, because ceiling is
@@ -797,50 +811,33 @@ contains
         end if
 
         ! Check non-negativeness
-        call assert(nx >= 1 .and. ny >= 1 .and. nz >= 1, ' <set_regular_space> Error: n# must >= 1')
-        call assert(dx > 0 .and. dy > 0 .and. dz > 0, ' <set_regular_space> Error: d# must > 0')
+        call assert(nx >= 1 .and. ny >= 1 .and. nz >= 1, ' <set_regular_space> Error: nlon, nlat and ndepth must be >= 1')
+        call assert(dx > 0 .and. dy > 0 .and. dz > 0, ' <set_regular_space> Error: dlon, dlat and ddepth must be > 0')
+
+        ! The exact geometry of the spherical grid, set once here
+        call init_spherical_grid(nx, ny, nz, dble(ox), dble(oy), dble(oz), dble(dx), dble(dy), dble(dz))
 
         ! Print original and target model dimensions
         if (rankid == 0) then
-            if (ny == 1) then
-                call warn(' ')
-                call warn(' Original model dimensions: ')
-                call warn('      nx, nz = '//num2str(nx0)//', '//num2str(nz0))
-                call warn('      dx, dz = '//num2str(dx0, '(es)')//', '//num2str(dz0, '(es)'))
-                call warn('      ox, oz = '//num2str(ox0, '(es)')//', '//num2str(oz0, '(es)'))
-                call warn('      ex, ez = ' &
-                    //num2str(ox0 + (nx0 - 1)*dx0, '(es)')//', ' &
-                    //num2str(oz0 + (nz0 - 1)*dz0, '(es)'))
-                call warn(' ')
-                call warn(' Target model dimensions: ')
-                call warn('      nx, nz = '//num2str(nx)//', '//num2str(nz))
-                call warn('      dx, dz = '//num2str(dx, '(es)')//', '//num2str(dz, '(es)'))
-                call warn('      ox, oz = '//num2str(ox, '(es)')//', '//num2str(oz, '(es)'))
-                call warn('      ex, ez = ' &
-                    //num2str(ox + (nx - 1)*dx, '(es)')//', ' &
-                    //num2str(oz + (nz - 1)*dz, '(es)'))
-                call warn(' ')
-            else
-                call warn(' ')
-                call warn(' Original model dimensions: ')
-                call warn('      nx, ny, nz = '//num2str(nx0)//', '//num2str(ny0)//', '//num2str(nz0))
-                call warn('      dx, dy, dz = '//num2str(dx0, '(es)')//', '//num2str(dy0, '(es)')//', '//num2str(dz0, '(es)'))
-                call warn('      ox, oy, oz = '//num2str(ox0, '(es)')//', '//num2str(oy0, '(es)')//', '//num2str(oz0, '(es)'))
-                call warn('      ex, ey, ez = ' &
-                    //num2str(ox0 + (nx0 - 1)*dx0, '(es)')//', ' &
-                    //num2str(oy0 + (ny0 - 1)*dy0, '(es)')//', ' &
-                    //num2str(oz0 + (nz0 - 1)*dz0, '(es)'))
-                call warn(' ')
-                call warn(' Target model dimensions: ')
-                call warn('      nx, ny, nz = '//num2str(nx)//', '//num2str(ny)//', '//num2str(nz))
-                call warn('      dx, dy, dz = '//num2str(dx, '(es)')//', '//num2str(dy, '(es)')//', '//num2str(dz, '(es)'))
-                call warn('      ox, oy, oz = '//num2str(ox, '(es)')//', '//num2str(oy, '(es)')//', '//num2str(oz, '(es)'))
-                call warn('      ex, ey, ez = ' &
-                    //num2str(ox + (nx - 1)*dx, '(es)')//', ' &
-                    //num2str(oy + (ny - 1)*dy, '(es)')//', ' &
-                    //num2str(oz + (nz - 1)*dz, '(es)'))
-                call warn(' ')
-            end if
+            call warn(' ')
+            call warn(' Original model dimensions (lon, lat, depth): ')
+            call warn('      nlon, nlat, ndepth = '//num2str(nx0)//', '//num2str(ny0)//', '//num2str(nz0))
+            call warn('      dlon, dlat, ddepth = '//num2str(dx0, '(es)')//', '//num2str(dy0, '(es)')//', '//num2str(dz0, '(es)'))
+            call warn('      olon, olat, odepth = '//num2str(ox0, '(es)')//', '//num2str(oy0, '(es)')//', '//num2str(oz0, '(es)'))
+            call warn('      elon, elat, edepth = ' &
+                //num2str(ox0 + (nx0 - 1)*dx0, '(es)')//', ' &
+                //num2str(oy0 + (ny0 - 1)*dy0, '(es)')//', ' &
+                //num2str(oz0 + (nz0 - 1)*dz0, '(es)'))
+            call warn(' ')
+            call warn(' Target model dimensions (lon, lat, depth): ')
+            call warn('      nlon, nlat, ndepth = '//num2str(nx)//', '//num2str(ny)//', '//num2str(nz))
+            call warn('      dlon, dlat, ddepth = '//num2str(dx, '(es)')//', '//num2str(dy, '(es)')//', '//num2str(dz, '(es)'))
+            call warn('      olon, olat, odepth = '//num2str(ox, '(es)')//', '//num2str(oy, '(es)')//', '//num2str(oz, '(es)'))
+            call warn('      elon, elat, edepth = ' &
+                //num2str(ox + (nx - 1)*dx, '(es)')//', ' &
+                //num2str(oy + (ny - 1)*dy, '(es)')//', ' &
+                //num2str(oz + (nz - 1)*dz, '(es)'))
+            call warn(' ')
         end if
 
     end subroutine set_regular_space
@@ -852,14 +849,24 @@ contains
 
         type(source_receiver_geometry), intent(inout) :: geom
 
+        double precision, dimension(1:2) :: mpd
+        real :: extra_lon, extra_lat
+
+        ! The margins adp_extra_lon and adp_extra_lat are lengths; in degrees,
+        ! they use the smallest length of a degree anywhere in the grid, so
+        ! that the margin is never shorter than asked for
+        mpd = min_length_per_degree()
+        extra_lon = real(adpextrax/mpd(1))
+        extra_lat = real(adpextray/mpd(2))
+
         ! range selection
         if (yn_adpx) then
             shot_xbeg = max(xmin, min( &
                 minval(geom%recr(:)%x, mask=geom%recr(:)%weight /= 0), &
-                minval(geom%srcr(:)%x)) - adpextrax)
+                minval(geom%srcr(:)%x)) - extra_lon)
             shot_xend = min(xmax, max( &
                 maxval(geom%recr(:)%x, mask=geom%recr(:)%weight /= 0), &
-                maxval(geom%srcr(:)%x)) + adpextrax)
+                maxval(geom%srcr(:)%x)) + extra_lon)
             shot_xbeg = floor((shot_xbeg - ox)/dx)*dx + ox
             shot_xend = ceiling((shot_xend - ox)/dx)*dx + ox
         else
@@ -878,10 +885,10 @@ contains
         if (yn_adpy) then
             shot_ybeg = max(ymin, min( &
                 minval(geom%recr(:)%y, mask=geom%recr(:)%weight /= 0), &
-                minval(geom%srcr(:)%y)) - adpextray)
+                minval(geom%srcr(:)%y)) - extra_lat)
             shot_yend = min(ymax, max( &
                 maxval(geom%recr(:)%y, mask=geom%recr(:)%weight /= 0), &
-                maxval(geom%srcr(:)%y)) + adpextray)
+                maxval(geom%srcr(:)%y)) + extra_lat)
             shot_ybeg = floor((shot_ybeg - oy)/dy)*dy + oy
             shot_yend = ceiling((shot_yend - oy)/dy)*dy + oy
         else
@@ -933,33 +940,359 @@ contains
 
         if (verbose) then
             call warn(date_time_compact()//' Shot '//num2str(gmtr(ishot)%id)//' dimensions:')
-            call warn(date_time_compact()//'      xmin, xmax = ' &
+            call warn(date_time_compact()//'      lonmin, lonmax = ' &
                 //num2str(shot_xbeg, '(es)')//', '//num2str(shot_xend, '(es)'))
             if (shot_ny > 1) then
-                call warn(date_time_compact()//'      ymin, ymax = ' &
+                call warn(date_time_compact()//'      latmin, latmax = ' &
                     //num2str(shot_ybeg, '(es)')//', '//num2str(shot_yend, '(es)'))
             end if
-            call warn(date_time_compact()//'      zmin, zmax = ' &
+            call warn(date_time_compact()//'      depthmin, depthmax = ' &
                 //num2str(shot_zbeg, '(es)')//', '//num2str(shot_zend, '(es)'))
             if (shot_ny > 1) then
-                call warn(date_time_compact()//'      nx, ny, nz = ' &
+                call warn(date_time_compact()//'      nlon, nlat, ndepth = ' &
                     //num2str(shot_nx)//', '//num2str(shot_ny)//', '//num2str(shot_nz))
             else
-                call warn(date_time_compact()//'      nx, nz = ' &
+                call warn(date_time_compact()//'      nlon, ndepth = ' &
                     //num2str(shot_nx)//', '//num2str(shot_nz))
             end if
-            call warn(date_time_compact()//'      nxmin, nxmax = ' &
+            call warn(date_time_compact()//'      ilonmin, ilonmax = ' &
                 //num2str(shot_nxbeg)//', '//num2str(shot_nxend))
             if (shot_ny > 1) then
-                call warn(date_time_compact()//'      nymin, nymax = ' &
+                call warn(date_time_compact()//'      ilatmin, ilatmax = ' &
                     //num2str(shot_nybeg)//', '//num2str(shot_nyend))
             end if
-            call warn(date_time_compact()//'      nzmin, nzmax = ' &
+            call warn(date_time_compact()//'      idepthmin, idepthmax = ' &
                 //num2str(shot_nzbeg)//', '//num2str(shot_nzend))
             call warn(date_time_compact()//'      ns, nr = ' &
                 //num2str(count(geom%srcr(:)%amp /= 0))//', '//num2str(count(geom%recr(:)%weight /= 0)))
         end if
 
     end subroutine set_adaptive_model_range
+
+    !
+    !> Stop if the parameter file uses a parameter name, model name or option
+    !> value of the Cartesian LATTE that the spherical branch renamed, or a
+    !> parameter of a feature that the spherical branch does not support. The
+    !> file is read with the same rules as the FLIT readpar routines: one
+    !> "name = value" per line, names are case-insensitive, a line with an
+    !> empty value is not a parameter, and reading stops at a line "exit".
+    !> Every offending line is reported before the program stops.
+    !
+    subroutine check_spherical_parameter_file
+
+        character(len=1024) :: line, key, val
+        integer :: funit, eq, ioerr, nbad
+
+        nbad = 0
+        open (newunit=funit, file=tidy(file_parameter), status='old', action='read')
+        do
+            read (funit, '(a)', iostat=ioerr) line
+            if (ioerr /= 0) exit
+            if (tidy(line) == 'exit') exit
+            eq = index(line, '=')
+            if (eq < 2) cycle
+            key = to_lower(tidy(line(1:eq - 1)))
+            val = to_lower(tidy(line(eq + 1:)))
+            if (len_trim(val) == 0) cycle
+            call check_spherical_parameter(key, val, nbad)
+        end do
+        close (funit)
+
+        if (nbad > 0) then
+            if (rankid == 0) then
+                call warn(date_time_compact()//' <check_spherical_parameter_file> Error: ' &
+                    //num2str(nbad)//' parameter(s) above are not valid in the spherical branch. Exiting. ')
+            end if
+            call mpibarrier
+            call mpistop
+        end if
+
+    end subroutine check_spherical_parameter_file
+
+    !
+    !> Check one parameter of the parameter file; see check_spherical_parameter_file
+    !
+    subroutine check_spherical_parameter(key, val, nbad)
+
+        character(len=*), intent(in) :: key, val
+        integer, intent(inout) :: nbad
+
+        character(len=64), dimension(10), parameter :: unsupported_names = [character(len=64) :: &
+            'source_regularization_method', 'yn_save_traveltime_gradients', 'dir_gradient', &
+            'nrefl', 'offset_min_refl', 'offset_max_refl', 'offset_max_refl_depth', &
+            'step_max_refl', 'yn_refl_image', 'incident_wave']
+        character(len=32), dimension(6), parameter :: unsupported_prefixes = [character(len=32) :: &
+            'clustering_fit_', 'reg_ml_', 'raypath_', 'reg_andf_', 'refl_', 'reflector_']
+        character(len=1024) :: newkey
+        character(len=64), allocatable, dimension(:) :: items
+        integer :: i
+
+        ! Parameters of unsupported features
+        if (any(key == unsupported_names) .or. index(key, 'dipfilt') > 0 .or. par_has_token(key, 'refl')) then
+            call report_unsupported('parameter '//tidy(key))
+            return
+        end if
+        do i = 1, size(unsupported_prefixes)
+            if (par_starts_with(key, unsupported_prefixes(i))) then
+                call report_unsupported('parameter '//tidy(key))
+                return
+            end if
+        end do
+
+        ! Values that hold model names
+        if (any(key == [character(len=16) :: 'model_update', 'model_aux', 'model_name'])) then
+            items = par_split_list(val)
+            do i = 1, size(items)
+                select case (items(i))
+                    case ('sx')
+                        call report_renamed('model name sx in '//tidy(key), 'slon')
+                    case ('sy')
+                        call report_renamed('model name sy in '//tidy(key), 'slat')
+                    case ('sz')
+                        call report_renamed('model name sz in '//tidy(key), 'sdepth')
+                    case ('refl')
+                        call report_unsupported('model name refl in '//tidy(key))
+                end select
+            end do
+        end if
+
+        ! Values that hold gradient processing options
+        if (par_starts_with(key, 'process_')) then
+            items = par_split_list(val)
+            do i = 1, size(items)
+                select case (items(i))
+                    case ('rmsbalx')
+                        call report_renamed('option rmsbalx in '//tidy(key), 'rmsbal_lon')
+                    case ('rmsbaly')
+                        call report_renamed('option rmsbaly in '//tidy(key), 'rmsbal_lat')
+                    case ('rmsbalxy')
+                        call report_renamed('option rmsbalxy in '//tidy(key), 'rmsbal_lonlat')
+                    case ('rmsbalz')
+                        call report_renamed('option rmsbalz in '//tidy(key), 'rmsbal_depth')
+                    case ('dipfilt')
+                        call report_unsupported('option dipfilt in '//tidy(key))
+                end select
+            end do
+        end if
+
+        ! Values that hold model regularization methods
+        if (key == 'model_regularization_method') then
+            items = par_split_list(val)
+            do i = 1, size(items)
+                if (items(i) == 'structure') then
+                    call report_unsupported('option structure in '//tidy(key))
+                end if
+            end do
+        end if
+
+        ! Renamed parameter names
+        newkey = spherical_parameter_name(key)
+        if (newkey /= '') then
+            call report_renamed('parameter '//tidy(key), tidy(newkey))
+        end if
+
+    contains
+
+        subroutine report_unsupported(what)
+            character(len=*), intent(in) :: what
+            nbad = nbad + 1
+            if (rankid == 0) then
+                call warn(' Error: '//what//' belongs to a feature that the spherical branch does not support.')
+            end if
+        end subroutine report_unsupported
+
+        subroutine report_renamed(what, replacement)
+            character(len=*), intent(in) :: what, replacement
+            nbad = nbad + 1
+            if (rankid == 0) then
+                call warn(' Error: '//what//' is a Cartesian name; the spherical branch uses '//replacement//'.')
+            end if
+        end subroutine report_renamed
+
+    end subroutine check_spherical_parameter
+
+    !
+    !> The spherical name of a parameter name of the Cartesian LATTE, or an
+    !> empty string if the name was not renamed. x, y and z become lon, lat
+    !> and depth; the TLOC source parameters sx, sy and sz become slon, slat
+    !> and sdepth wherever they appear as a part of a name, e.g., file_sx.
+    !
+    function spherical_parameter_name(key) result(newkey)
+
+        character(len=*), intent(in) :: key
+        character(len=1024) :: newkey
+
+        character(len=1), dimension(3), parameter :: axes = ['x', 'y', 'z']
+        character(len=5), dimension(3), parameter :: names = [character(len=5) :: 'lon', 'lat', 'depth']
+        character(len=32), dimension(13) :: words
+        character(len=64), allocatable, dimension(:) :: tokens
+        character(len=1) :: a
+        character(len=5) :: n
+        character(len=32) :: w
+        integer :: i, l
+        logical :: changed
+
+        newkey = ''
+
+        do i = 1, 3
+
+            a = axes(i)
+            n = names(i)
+
+            ! Grid, ranges, source and receiver selection, adaptive range,
+            ! regularization and MPI decomposition
+            if (key == 'n'//a) newkey = 'n'//tidy(n)
+            if (key == 'd'//a) newkey = 'd'//tidy(n)
+            if (key == 'o'//a) newkey = 'o'//tidy(n)
+            if (key == 'nn'//a) newkey = 'nn'//tidy(n)
+            if (key == 'dd'//a) newkey = 'dd'//tidy(n)
+            if (key == 'oo'//a) newkey = 'oo'//tidy(n)
+            if (key == a//'min') newkey = tidy(n)//'min'
+            if (key == a//'max') newkey = tidy(n)//'max'
+            if (key == 's'//a//'min') newkey = 's'//tidy(n)//'_min'
+            if (key == 's'//a//'max') newkey = 's'//tidy(n)//'_max'
+            if (key == 'r'//a//'min') newkey = 'r'//tidy(n)//'_min'
+            if (key == 'r'//a//'max') newkey = 'r'//tidy(n)//'_max'
+            if (key == 'rank'//a) newkey = 'rank_'//tidy(n)
+            if (key == 'reg_smooth'//a) newkey = 'reg_smooth_'//tidy(n)
+            if (par_starts_with(key, 'reg_smooth'//a//'_')) then
+                newkey = 'reg_smooth_'//tidy(n)//'_'//key(len('reg_smooth'//a//'_') + 1:)
+            end if
+
+            ! Names that end with a word followed by the axis
+            words = [character(len=32) :: 'smooth', 'taper', 'movingbal', 'medianfilt', 'rmsbal', &
+                'wavenum', 'andf_rank', 'extra', 'adp', 'conemute', '', '', '']
+            do l = 1, 10
+                w = words(l)
+                if (w == 'conemute' .and. a /= 'z') then
+                    cycle
+                end if
+                if (par_ends_with(key, '_'//tidy(w)//a)) then
+                    newkey = key(1:len_trim(key) - len_trim(w) - 1)//tidy(w)//'_'//tidy(n)
+                end if
+                if (w == 'wavenum' .and. par_ends_with(key, '_wavenum'//a//'_amps')) then
+                    newkey = key(1:len_trim(key) - len('wavenum'//a//'_amps'))//'wavenum_'//tidy(n)//'_amps'
+                end if
+            end do
+
+        end do
+
+        ! The TLOC source parameters as parts of a name
+        if (newkey == '') then
+            tokens = par_split_tokens(key)
+            changed = .false.
+            do i = 1, size(tokens)
+                select case (tokens(i))
+                    case ('sx')
+                        tokens(i) = 'slon'
+                        changed = .true.
+                    case ('sy')
+                        tokens(i) = 'slat'
+                        changed = .true.
+                    case ('sz')
+                        tokens(i) = 'sdepth'
+                        changed = .true.
+                end select
+            end do
+            if (changed) then
+                newkey = tidy(tokens(1))
+                do i = 2, size(tokens)
+                    newkey = tidy(newkey)//'_'//tidy(tokens(i))
+                end do
+            end if
+        end if
+
+    end function spherical_parameter_name
+
+    !
+    !> Whether a string starts with a prefix
+    !
+    pure logical function par_starts_with(s, prefix)
+        character(len=*), intent(in) :: s, prefix
+        par_starts_with = .false.
+        if (len_trim(s) >= len_trim(prefix)) then
+            par_starts_with = s(1:len_trim(prefix)) == prefix(1:len_trim(prefix))
+        end if
+    end function par_starts_with
+
+    !
+    !> Whether a string ends with a suffix
+    !
+    pure logical function par_ends_with(s, suffix)
+        character(len=*), intent(in) :: s, suffix
+        integer :: ls, lf
+        ls = len_trim(s)
+        lf = len_trim(suffix)
+        par_ends_with = .false.
+        if (ls >= lf .and. lf > 0) then
+            par_ends_with = s(ls - lf + 1:ls) == suffix(1:lf)
+        end if
+    end function par_ends_with
+
+    !
+    !> The parts of a name separated by underscores
+    !
+    function par_split_tokens(s) result(tokens)
+        character(len=*), intent(in) :: s
+        character(len=64), allocatable, dimension(:) :: tokens
+        integer :: i, b, n
+        n = 1
+        do i = 1, len_trim(s)
+            if (s(i:i) == '_') n = n + 1
+        end do
+        allocate (tokens(1:n))
+        n = 0
+        b = 1
+        do i = 1, len_trim(s) + 1
+            if (i > len_trim(s)) then
+                n = n + 1
+                tokens(n) = s(b:len_trim(s))
+            else if (s(i:i) == '_') then
+                n = n + 1
+                tokens(n) = s(b:i - 1)
+                b = i + 1
+            end if
+        end do
+    end function par_split_tokens
+
+    !
+    !> Whether one of the underscore-separated parts of a name is a token
+    !
+    logical function par_has_token(s, token)
+        character(len=*), intent(in) :: s, token
+        character(len=64), allocatable, dimension(:) :: tokens
+        tokens = par_split_tokens(s)
+        par_has_token = any(tokens == token)
+    end function par_has_token
+
+    !
+    !> The items of a comma-separated value, without blanks and without a
+    !> leading iteration schedule "n:" or "n~m:" of the readpar_x routines
+    !
+    function par_split_list(s) result(items)
+        character(len=*), intent(in) :: s
+        character(len=64), allocatable, dimension(:) :: items
+        integer :: i, b, n, c
+        character(len=1024) :: t
+        n = 1
+        do i = 1, len_trim(s)
+            if (s(i:i) == ',') n = n + 1
+        end do
+        allocate (items(1:n))
+        n = 0
+        b = 1
+        do i = 1, len_trim(s) + 1
+            if (i > len_trim(s) .or. s(min(i, len(s)):min(i, len(s))) == ',') then
+                n = n + 1
+                t = adjustl(s(b:i - 1))
+                c = index(t, ':')
+                if (c > 0) then
+                    t = adjustl(t(c + 1:))
+                end if
+                items(n) = trim(t)
+                b = i + 1
+            end if
+        end do
+    end function par_split_list
 
 end module parameters

@@ -163,9 +163,9 @@ contains
 
         mt = m
 
-        call readpar_int(file_parameter, 'rankx', rank3, floor(nrank**0.33333333d0))
-        call readpar_int(file_parameter, 'ranky', rank2, floor(nrank**0.33333333d0))
-        call readpar_int(file_parameter, 'rankz', rank1, floor(nrank**0.33333333d0))
+        call readpar_int(file_parameter, 'rank_lon', rank3, floor(nrank**0.33333333d0))
+        call readpar_int(file_parameter, 'rank_lat', rank2, floor(nrank**0.33333333d0))
+        call readpar_int(file_parameter, 'rank_depth', rank1, floor(nrank**0.33333333d0))
 
         do i = 1, size(model_regularization_method)
 
@@ -180,17 +180,17 @@ contains
                     end if
 
                 case ('smooth')
-                    call readpar_xfloat(file_parameter, 'reg_smoothx', reg_smoothx, -1.0, iter*1.0)
+                    call readpar_xfloat(file_parameter, 'reg_smooth_lon', reg_smoothx, -1.0, iter*1.0)
                     if (reg_smoothx < 0) then
-                        call readpar_xfloat(file_parameter, 'reg_smoothx_'//tidy(name), reg_smoothx, 1.0*dx, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_smooth_lon_'//tidy(name), reg_smoothx, 1.0*dx, iter*1.0)
                     end if
-                    call readpar_xfloat(file_parameter, 'reg_smoothy', reg_smoothy, -1.0, iter*1.0)
+                    call readpar_xfloat(file_parameter, 'reg_smooth_lat', reg_smoothy, -1.0, iter*1.0)
                     if (reg_smoothy < 0) then
-                        call readpar_xfloat(file_parameter, 'reg_smoothy_'//tidy(name), reg_smoothy, 1.0*dy, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_smooth_lat_'//tidy(name), reg_smoothy, 1.0*dy, iter*1.0)
                     end if
-                    call readpar_xfloat(file_parameter, 'reg_smoothz', reg_smoothz, -1.0, iter*1.0)
+                    call readpar_xfloat(file_parameter, 'reg_smooth_depth', reg_smoothz, -1.0, iter*1.0)
                     if (reg_smoothz < 0) then
-                        call readpar_xfloat(file_parameter, 'reg_smoothz_'//tidy(name), reg_smoothz, 1.0*dz, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_smooth_depth_'//tidy(name), reg_smoothz, 1.0*dz, iter*1.0)
                     end if
                     if (present(smooth_inverse) .and. smooth_inverse) then
                         mt = 1.0/gauss_filt(1.0/mt, [reg_smoothz/dz, reg_smoothy/dy, reg_smoothx/dx])
@@ -216,9 +216,9 @@ contains
                 case ('vpvs_similarity')
                     if (name == 'vs') then
 
-                        call readpar_xfloat(file_parameter, 'reg_similarity_smoothx', sim_smoothx, 5*dx, iter*1.0)
-                        call readpar_xfloat(file_parameter, 'reg_similarity_smoothy', sim_smoothy, 5*dy, iter*1.0)
-                        call readpar_xfloat(file_parameter, 'reg_similarity_smoothz', sim_smoothz, 5*dz, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_lon', sim_smoothx, 5*dx, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_lat', sim_smoothy, 5*dy, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_depth', sim_smoothz, 5*dz, iter*1.0)
                         call readpar_xfloat(file_parameter, 'reg_similarity_vpvs_ratio_min', rmin, min_vpvsratio, iter*1.0)
                         call readpar_xfloat(file_parameter, 'reg_similarity_vpvs_ratio_max', rmax, max_vpvsratio, iter*1.0)
 
@@ -272,7 +272,7 @@ contains
 
         do i = 1, nmodel
 
-            if (.not. any(model_m(i)%name == ['sx', 'sy', 'sz', 'st0'])) then
+            if (.not. any(model_m(i)%name == [character(len=6) :: 'slon', 'slat', 'sdepth', 'st0'])) then
 
                 if (model_m(i)%name == 'vp' .or. model_m(i)%name == 'vs') then
                     call regularize_single_parameter(model_m(i)%array, &

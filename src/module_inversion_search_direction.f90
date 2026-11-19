@@ -300,7 +300,7 @@ contains
 
                     model_srch(i)%array = reshape(tmp, [nz, ny, nx])
 
-                case('sx', 'sy', 'sz', 'st0')
+                case('slon', 'slat', 'sdepth', 'st0')
 
                     ng = nr_virtual
                     tmp = zeros(ng)

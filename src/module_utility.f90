@@ -517,9 +517,9 @@ contains
                 open(newunit=funit, file=tidy(dir_working)//'/exchange_geometry.txt', status='replace')
                 write(funit, '(A)') '# Exchange Geometry File'
                 write(funit, '(A)') '# Virtual Sources (Unique Receiver Positions)'
-                write(funit, '(A)') '# Format: virtual_shot_id x_coord y_coord z_coord'
+                write(funit, '(A)') '# Format: virtual_shot_id longitude(deg) geodetic_latitude(deg) depth_below_msl'
                 do k = 1, nr
-                    write(funit, '(I0,1X,F12.3,1X,F12.3,1X,F12.3)') k, rxyz(k, 1), rxyz(k, 2), rxyz(k, 3)
+                    write(funit, '(I0,1X,ES16.9,1X,ES16.9,1X,ES16.9)') k, rxyz(k, 1), rxyz(k, 2), rxyz(k, 3)
                 end do
                 close(funit)
 
