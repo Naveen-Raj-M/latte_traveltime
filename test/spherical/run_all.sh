@@ -43,3 +43,10 @@ bash "$here/step3/run_gradient_fd.sh" "$objdir"
 echo "################ Step 3: end-to-end FATT and TLOC ################"
 PYTHON=$python bash "$here/step3/run_fatt.sh" "$bindir"
 PYTHON=$python bash "$here/step3/run_tloc.sh" "$bindir"
+
+echo "################ Step 4: exact-distance filters ################"
+bash "$here/step4/run_filters.sh" "$objdir"
+
+echo "################ Step 4: cone mute and FATT with processing ################"
+PYTHON=$python bash "$here/step4/run_conemute.sh" "$bindir"
+PYTHON=$python bash "$here/step4/run_fatt_processing.sh" "$bindir"

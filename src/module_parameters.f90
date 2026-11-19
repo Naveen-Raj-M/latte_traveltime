@@ -1028,8 +1028,11 @@ contains
         character(len=64), allocatable, dimension(:) :: items
         integer :: i
 
-        ! Parameters of unsupported features
-        if (any(key == unsupported_names) .or. index(key, 'dipfilt') > 0 .or. par_has_token(key, 'refl')) then
+        ! Parameters of unsupported features; wavenumber filtering along
+        ! latitude is not supported, because the spacing along a latitude
+        ! line is not even
+        if (any(key == unsupported_names) .or. index(key, 'dipfilt') > 0 .or. par_has_token(key, 'refl') &
+                .or. par_ends_with(key, '_wavenum_lat') .or. par_ends_with(key, '_wavenum_lat_amps')) then
             call report_unsupported('parameter '//tidy(key))
             return
         end if

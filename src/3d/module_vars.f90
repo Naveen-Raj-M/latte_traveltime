@@ -21,6 +21,7 @@ module vars
 
     use libflit
     use parameters
+    use spherical_filter
 
     implicit none
 
@@ -278,7 +279,7 @@ contains
 
                 if (vpvsratio_smoothx /= 0 .or. &
                     vpvsratio_smoothy /= 0 .or. vpvsratio_smoothz /= 0) then
-                    r = gauss_filt(r, [vpvsratio_smoothz/dz, vpvsratio_smoothy/dy, vpvsratio_smoothx/dx])
+                    r = sph_gauss_filt(r, 1, 1, [vpvsratio_smoothx, vpvsratio_smoothy, vpvsratio_smoothz])
                 end if
                 r = clip(r, min_vpvsratio, max_vpvsratio)
 
@@ -312,7 +313,7 @@ contains
 
                 if (vpvsratio_smoothx /= 0 .or. &
                     vpvsratio_smoothy /= 0 .or. vpvsratio_smoothz /= 0) then
-                    r = gauss_filt(r, [vpvsratio_smoothz/dz, vpvsratio_smoothy/dy, vpvsratio_smoothx/dx])
+                    r = sph_gauss_filt(r, 1, 1, [vpvsratio_smoothx, vpvsratio_smoothy, vpvsratio_smoothz])
                 end if
                 r = clip(r, min_vpvsratio, max_vpvsratio)
 

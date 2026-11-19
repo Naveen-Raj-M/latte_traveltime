@@ -23,6 +23,7 @@ module gradient
     use parameters
     use vars
     use utility
+    use spherical_filter
 
     implicit none
 
@@ -168,6 +169,15 @@ contains
 
     !
     !> Process gradient of one shot
+    !>
+    !> Spherical branch: lengths are in the model length unit (meters).
+    !> Smoothing, tapers, the cone mute and the adaptive-range taper use exact
+    !> distances on the spherical grid (module spherical_filter). The window
+    !> filters (movingbal, medianfilt) work on a fixed number of cells, which
+    !> is the length over the reference cell size at the centre of the grid,
+    !> top level (reference_spacing); laplacefilt works in grid-index space.
+    !> Default lengths are the Cartesian defaults in cells times the
+    !> reference cell size.
     !
     subroutine process_model_single_shot(ishot, w, ws, name)
 
@@ -175,7 +185,7 @@ contains
         real, dimension(:, :, :), intent(inout) :: w, ws
         character(len=*), intent(in) :: name
 
-        integer :: i, j, k
+        integer :: i, j, k, ix, iy, jg, kg
         character(len=1024) :: dir_mask
         real :: shot_w_movingbalx, shot_w_movingbaly, shot_w_movingbalz
         real, allocatable, dimension(:) :: shot_w_taperx, shot_w_tapery, shot_w_taperz
@@ -184,14 +194,16 @@ contains
         real, allocatable, dimension(:) :: wavenums, wamps
         real, allocatable, dimension(:, :, :) :: w_mask
         character(len=32), allocatable, dimension(:) :: process_shot_grad_w
-        real, allocatable, dimension(:) :: st
-        real :: tp
         real :: conemuter, conemutez, conemutepower, conemutetaper
         character(len=24) :: conemuteorigin
-        real :: srcx, srcy, srcz, depth, ds, dist
-        integer :: pr, pt, ix, iy
         character(len=1024) :: file_mask
-        integer, dimension(1:6) :: ntaper
+        real, dimension(1:3) :: href
+        real, dimension(1:6) :: tlen
+        double precision :: depth, srcz, radius, dist, tp
+        double precision, dimension(1:3) :: xc, uc, un
+
+        ! Reference cell size: east-west, north-south, vertical
+        href = real(reference_spacing())
 
         call readpar_nstring(file_parameter, 'process_shot_'//tidy(name)//'', process_shot_grad_w, [''])
 
@@ -202,11 +214,12 @@ contains
             select case (process_shot_grad_w(i))
 
                 case ('smooth')
-                    ! Gaussian smooth
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_smooth_lon', shot_w_smoothx, 3*dx)
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_smooth_lat', shot_w_smoothy, 3*dy)
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_smooth_depth', shot_w_smoothz, 3*dz)
-                    ws = gauss_filt(ws, [shot_w_smoothz/dz, shot_w_smoothy/dy, shot_w_smoothx/dx])
+                    ! Gaussian smooth, exact distances; the lengths are the
+                    ! standard deviations
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_smooth_lon', shot_w_smoothx, 3*href(1))
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_smooth_lat', shot_w_smoothy, 3*href(2))
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_smooth_depth', shot_w_smoothz, 3*href(3))
+                    ws = sph_gauss_filt(ws, shot_nybeg, shot_nzbeg, [shot_w_smoothx, shot_w_smoothy, shot_w_smoothz])
 
                 case ('maxbal')
                     if (maxval(abs(ws)) /= 0) then
@@ -220,64 +233,44 @@ contains
                     end if
 
                 case ('movingbal')
-                    ! Moving balance
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_movingbal_lon', shot_w_movingbalx, 6*dx)
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_movingbal_lat', shot_w_movingbaly, 6*dy)
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_movingbal_depth', shot_w_movingbalz, 6*dz)
-                    ws = balance_filt(ws, nint([0.5*shot_w_movingbalz/dz, 0.5*shot_w_movingbaly/dy, 0.5*shot_w_movingbalx/dx]), 0.01)
+                    ! Moving balance; window in cells of the reference size
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_movingbal_lon', shot_w_movingbalx, 6*href(1))
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_movingbal_lat', shot_w_movingbaly, 6*href(2))
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_movingbal_depth', shot_w_movingbalz, 6*href(3))
+                    ws = balance_filt(ws, nint([0.5*shot_w_movingbalz/href(3), 0.5*shot_w_movingbaly/href(2), &
+                        0.5*shot_w_movingbalx/href(1)]), 0.01)
 
                 case ('medianfilt')
-                    ! Median filtering
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_medianfilt_lon', shot_w_medianfiltx, dx)
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_medianfilt_lat', shot_w_medianfilty, dy)
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_medianfilt_depth', shot_w_medianfiltz, dz)
-                    ws = median_filt(ws, nint([shot_w_medianfiltz/dz, shot_w_medianfilty/dy, shot_w_medianfiltx/dx]))
+                    ! Median filtering; window in cells of the reference size
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_medianfilt_lon', shot_w_medianfiltx, href(1))
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_medianfilt_lat', shot_w_medianfilty, href(2))
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_medianfilt_depth', shot_w_medianfiltz, href(3))
+                    ws = median_filt(ws, nint([shot_w_medianfiltz/href(3), shot_w_medianfilty/href(2), &
+                        shot_w_medianfiltx/href(1)]))
 
                 case ('removenan')
                     ! Remove NaN
                     ws = return_normal(ws)
 
                 case ('laplacefilt')
+                    ! Laplace filter in grid-index space
                     ws = laplace_filt(ws)
 
                 case ('wavenumfilt')
-                    ! Wavenumber-domain filtering in x-axis
+                    ! Wavenumber-domain filtering along longitude, with the
+                    ! exact spacing of each line
                     call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_wavenum_lon', wavenums, [-1.0])
                     call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_wavenum_lon_amps', wamps, [-1.0])
                     if (wavenums(1) >= 0) then
-                        !$omp parallel do private(j, k)
-                        do k = 1, size(ws, 1)
-                            do j = 1, size(ws, 2)
-                                ws(k, j, :) = fourier_filt(ws(k, j, :), dx, wavenums, wamps)
-                            end do
-                        end do
-                        !$omp end parallel do
+                        ws = sph_fourier_filt_lon(ws, shot_nybeg, shot_nzbeg, wavenums, wamps)
                     end if
-
-                    ! Wavenumber-domain filtering in x-axis
-                    call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_wavenum_lat', wavenums, [-1.0])
-                    call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_wavenum_lat_amps', wamps, [-1.0])
-                    if (wavenums(1) >= 0) then
-                        !$omp parallel do private(j, k)
-                        do k = 1, size(ws, 1)
-                            do j = 1, size(ws, 3)
-                                ws(k, :, j) = fourier_filt(ws(k, :, j), dy, wavenums, wamps)
-                            end do
-                        end do
-                        !$omp end parallel do
-                    end if
-
-                    ! Wavenumber-domain filtering in z-axis
+                    ! Wavenumber-domain filtering along depth; along latitude
+                    ! the spacing is not even, and the spherical branch does
+                    ! not support it (check_spherical_parameter_file)
                     call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_wavenum_depth', wavenums, [-1.0])
                     call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_wavenum_depth_amps', wamps, [-1.0])
                     if (wavenums(1) >= 0) then
-                        !$omp parallel do private(j, k)
-                        do k = 1, size(ws, 2)
-                            do j = 1, size(ws, 3)
-                                ws(:, k, j) = fourier_filt(ws(:, k, j), dz, wavenums, wamps)
-                            end do
-                        end do
-                        !$omp end parallel do
+                        ws = sph_fourier_filt_depth(ws, wavenums, wamps)
                     end if
 
                 case ('mask')
@@ -298,7 +291,7 @@ contains
                     ws = ws*w_mask
 
                 case ('taper')
-                    ! Tapering
+                    ! Tapering, exact distances from the sides of the shot range
                     call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_taper_lon', shot_w_taperx, [0.0, 0.0])
                     call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_taper_lat', shot_w_tapery, [0.0, 0.0])
                     call readpar_nfloat(file_parameter, 'shot_'//tidy(name)//'_taper_depth', shot_w_taperz, [0.0, 0.0])
@@ -311,63 +304,68 @@ contains
                     if (size(shot_w_taperz) == 1) then
                         call alloc_array(shot_w_taperz, [1, 2], source=[shot_w_taperz(1), shot_w_taperz(1)])
                     end if
-                    ws = taper(ws, nint([shot_w_taperz/dz, shot_w_tapery/dy, shot_w_taperx/dx]), &
-                        ['blackman', 'blackman', 'blackman', 'blackman', 'blackman', 'blackman'])
+                    ws = sph_taper(ws, shot_nybeg, shot_nzbeg, [shot_w_taperx(1:2), shot_w_tapery(1:2), shot_w_taperz(1:2)])
 
                 case ('conemute')
+                    ! Mute outside a cone below the source (or receivers): full
+                    ! weight within the radius, a linear ramp to zero over the
+                    ! taper length, and zero above the depth of the origin. The
+                    ! horizontal distance of a node is the great-circle angle
+                    ! between its column and the origin, times the node's radius.
                     call readpar_string(file_parameter, 'shot_'//tidy(name)//'_conemuteorigin', conemuteorigin, 'source')
                     call readpar_float(file_parameter, 'shot_'//tidy(name)//'_conemuter', conemuter, -1.0)
                     call readpar_float(file_parameter, 'shot_'//tidy(name)//'_conemute_depth', conemutez, -1.0)
                     call readpar_float(file_parameter, 'shot_'//tidy(name)//'_conemutepower', conemutepower, 2.0)
-                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_conemutetaper', conemutetaper, 10*mean([dx, dy, dz]))
+                    call readpar_float(file_parameter, 'shot_'//tidy(name)//'_conemutetaper', conemutetaper, 10*mean(href))
                     if (conemuter >= 0 .and. conemutez >= 0) then
 
                         conemutepower = max(1.0, conemutepower)
 
+                        ! Origin: the direction of the Earth-centred centroid of
+                        ! the points, and the depth of reference
+                        xc = 0.0d0
                         select case (conemuteorigin)
                             case ('source')
-                                srcx = mean(gmtr(ishot)%srcr(:)%x - shot_xbeg)
-                                srcy = mean(gmtr(ishot)%srcr(:)%y - shot_ybeg)
+                                do j = 1, gmtr(ishot)%ns
+                                    xc = xc + lonlatdepth_to_ecef(dble(gmtr(ishot)%srcr(j)%x), &
+                                        dble(gmtr(ishot)%srcr(j)%y), dble(gmtr(ishot)%srcr(j)%z))
+                                end do
                                 srcz = mean(gmtr(ishot)%srcr(:)%z)
                             case ('receiver')
-                                srcx = mean(gmtr(ishot)%recr(:)%x - shot_xbeg)
-                                srcy = mean(gmtr(ishot)%recr(:)%y - shot_ybeg)
+                                do j = 1, gmtr(ishot)%nr
+                                    xc = xc + lonlatdepth_to_ecef(dble(gmtr(ishot)%recr(j)%x), &
+                                        dble(gmtr(ishot)%recr(j)%y), dble(gmtr(ishot)%recr(j)%z))
+                                end do
                                 srcz = minval(gmtr(ishot)%recr(:)%z)
                         end select
+                        uc = xc/norm2(xc)
 
                         do k = 1, shot_nz
 
-                            depth = (k - 1)*dz + shot_zbeg
+                            kg = shot_nzbeg + k - 1
+                            depth = shot_zbeg + (k - 1)*dble(dz)
 
                             if (depth < srcz) then
                                 ! When the depth is shallower than source then set zero
                                 ws(k, :, :) = 0.0
                             else
-                                ! Otherwise, compute the circular taper at each depth
-                                ! A sufficiently fine sampling interval to capture variation
-                                ds = 0.25*min(dy, dx)
-                                ! The radius of muting and tapering
-                                pr = nint(conemuter*(min(depth - srcz, conemutez)/conemutez)**(1.0/conemutepower)/ds)
-                                pt = nint(conemutetaper/ds)
-                                ! Taper
-                                call alloc_array(st, [1, pr + pt])
-                                st = 1.0
-                                st = taper(st, [0, pt], ['', 'nuttall'])
-                                ! Do ther tapering based on distance of each spatial grid point
-                                !$omp parallel do private(ix, iy, dist, tp)
-                                do iy = 1, shot_ny
-                                    do ix = 1, shot_nx
-                                        ! Distance to source location (or its vertical projection)
-                                        dist = sqrt(((ix - 1)*dx - srcx)**2 + ((iy - 1)*dy - srcy)**2)
-                                        ! Weight
-                                        if (dist <= (pr - 1)*ds) then
-                                            tp = 1.0
-                                        else if (dist >= (pr + pt - 1)*ds) then
-                                            tp = 0.0
+                                ! The radius of the full weight at this depth
+                                radius = conemuter*(min(depth - srcz, dble(conemutez))/conemutez)**(1.0d0/conemutepower)
+                                !$omp parallel do private(ix, iy, jg, un, dist, tp)
+                                do ix = 1, shot_nx
+                                    do iy = 1, shot_ny
+                                        jg = shot_nybeg + iy - 1
+                                        un = [sph_coslat(jg)*sph_coslon(shot_nxbeg + ix - 1), &
+                                            sph_coslat(jg)*sph_sinlon(shot_nxbeg + ix - 1), sph_sinlat(jg)]
+                                        dist = sph_r(kg)*atan2(norm2(cross_product(un, uc)), dot_product(un, uc))
+                                        if (dist <= radius) then
+                                            tp = 1.0d0
+                                        else if (dist >= radius + conemutetaper .or. conemutetaper <= 0) then
+                                            tp = 0.0d0
                                         else
-                                            tp = 1 - (dist - (pr - 1)*ds)/(pt*ds)
+                                            tp = 1.0d0 - (dist - radius)/conemutetaper
                                         end if
-                                        ws(k, iy, ix) = ws(k, iy, ix)*tp
+                                        ws(k, iy, ix) = real(ws(k, iy, ix)*tp)
                                     end do
                                 end do
                                 !$omp end parallel do
@@ -389,22 +387,31 @@ contains
 
         ! Taper the sides of the shot range that lie inside the model, so that
         ! the merged gradient has no sharp edges along the adaptive range;
-        ! an axis without adaptive range is never tapered
-        ntaper = [ &
-            merge(min(nint(adptaperz/dz), shot_nz/2), 0, yn_adpz .and. shot_nzbeg > 1), &
-            merge(min(nint(adptaperz/dz), shot_nz/2), 0, yn_adpz .and. shot_nzend < nz), &
-            merge(min(nint(adptapery/dy), shot_ny/2), 0, yn_adpy .and. shot_nybeg > 1), &
-            merge(min(nint(adptapery/dy), shot_ny/2), 0, yn_adpy .and. shot_nyend < ny), &
-            merge(min(nint(adptaperx/dx), shot_nx/2), 0, yn_adpx .and. shot_nxbeg > 1), &
-            merge(min(nint(adptaperx/dx), shot_nx/2), 0, yn_adpx .and. shot_nxend < nx)]
-        if (any(ntaper > 0)) then
-            ws = taper(ws, ntaper, ['blackman', 'blackman', 'blackman', 'blackman', 'blackman', 'blackman'])
+        ! an axis without adaptive range is never tapered. Exact distances,
+        ! lengths adp_taper_lon, adp_taper_lat, adp_taper_depth.
+        tlen = [ &
+            merge(adptaperx, 0.0, yn_adpx .and. shot_nxbeg > 1), &
+            merge(adptaperx, 0.0, yn_adpx .and. shot_nxend < nx), &
+            merge(adptapery, 0.0, yn_adpy .and. shot_nybeg > 1), &
+            merge(adptapery, 0.0, yn_adpy .and. shot_nyend < ny), &
+            merge(adptaperz, 0.0, yn_adpz .and. shot_nzbeg > 1), &
+            merge(adptaperz, 0.0, yn_adpz .and. shot_nzend < nz)]
+        if (any(tlen > 0)) then
+            ws = sph_taper(ws, shot_nybeg, shot_nzbeg, tlen)
         end if
 
         ! Merge image
         w(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) = w(shot_nzbeg:shot_nzend, shot_nybeg:shot_nyend, shot_nxbeg:shot_nxend) + ws
 
         call warn(date_time_compact()//' Shot '//num2str(gmtr(ishot)%id)//' '//tidy(name)//' is merged. ')
+
+    contains
+
+        pure function cross_product(a, b) result(c)
+            double precision, dimension(1:3), intent(in) :: a, b
+            double precision, dimension(1:3) :: c
+            c = [a(2)*b(3) - a(3)*b(2), a(3)*b(1) - a(1)*b(3), a(1)*b(2) - a(2)*b(1)]
+        end function cross_product
 
     end subroutine process_model_single_shot
 
@@ -436,6 +443,10 @@ contains
         real :: w_rmsbalx, w_rmsbaly, w_rmsbalz
         integer, allocatable, dimension(:) :: update_iter
         character(len=1024) :: file_mask
+        real, dimension(1:3) :: href
+
+        ! Reference cell size: east-west, north-south, vertical
+        href = real(reference_spacing())
 
         call readpar_nstring(file_parameter, 'process_'//tidy(name), process_grad_w, [''])
 
@@ -464,10 +475,10 @@ contains
                     w = sign(1.0, w)*(abs(w))**w_signed_power
 
                 case ('movingbal')
-                    call readpar_xfloat(file_parameter, tidy(name)//'_movingbal_lon', w_movingbalx, 3*dx, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_movingbal_lat', w_movingbaly, 3*dy, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_movingbal_depth', w_movingbalz, 3*dz, iter*1.0)
-                    w = balance_filt(w, nint([0.5*w_movingbalz/dz, 0.5*w_movingbaly/dy, 0.5*w_movingbalx/dx]), 0.01)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_movingbal_lon', w_movingbalx, 3*href(1), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_movingbal_lat', w_movingbaly, 3*href(2), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_movingbal_depth', w_movingbalz, 3*href(3), iter*1.0)
+                    w = balance_filt(w, nint([0.5*w_movingbalz/href(3), 0.5*w_movingbaly/href(2), 0.5*w_movingbalx/href(1)]), 0.01)
 
                 case ('taper')
                     call readpar_nfloat(file_parameter, tidy(name)//'_taper_lon', w_taperx, [0.0, 0.0])
@@ -482,26 +493,25 @@ contains
                     if (size(w_taperz) == 1) then
                         call alloc_array(w_taperz, [1, 2], source=[w_taperz(1), w_taperz(1)])
                     end if
-                    w = taper(w, nint([w_taperz/dz, w_tapery/dy, w_taperx/dx]), &
-                        ['blackman', 'blackman', 'blackman', 'blackman', 'blackman', 'blackman'])
+                    w = sph_taper(w, 1, 1, [w_taperx(1:2), w_tapery(1:2), w_taperz(1:2)])
 
                 case ('smooth')
-                    call readpar_xfloat(file_parameter, tidy(name)//'_smooth_lon', w_smoothx, 3*dx, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_smooth_lat', w_smoothy, 3*dy, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_smooth_depth', w_smoothz, 3*dz, iter*1.0)
-                    w = gauss_filt(w, [w_smoothz/dz, w_smoothy/dy, w_smoothx/dx])
+                    call readpar_xfloat(file_parameter, tidy(name)//'_smooth_lon', w_smoothx, 3*href(1), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_smooth_lat', w_smoothy, 3*href(2), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_smooth_depth', w_smoothz, 3*href(3), iter*1.0)
+                    w = sph_gauss_filt(w, 1, 1, [w_smoothx, w_smoothy, w_smoothz])
 
                 case ('andf')
-                    call readpar_xfloat(file_parameter, tidy(name)//'_andf_smooth_lon', param%smooth3, 2*dx, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_andf_smooth_lat', param%smooth2, 2*dy, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_andf_smooth_depth', param%smooth1, 8*dz, iter*1.0)
-                    param%smooth3 = param%smooth3/dx
-                    param%smooth2 = param%smooth2/dy
-                    param%smooth1 = param%smooth1/dz
+                    call readpar_xfloat(file_parameter, tidy(name)//'_andf_smooth_lon', param%smooth3, 2*href(1), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_andf_smooth_lat', param%smooth2, 2*href(2), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_andf_smooth_depth', param%smooth1, 8*href(3), iter*1.0)
+                    param%smooth3 = param%smooth3/href(1)
+                    param%smooth2 = param%smooth2/href(2)
+                    param%smooth1 = param%smooth1/href(3)
                     call readpar_xfloat(file_parameter, tidy(name)//'_andf_powerm', param%powerm, 1.0, iter*1.0)
                     call readpar_xint(file_parameter, tidy(name)//'_andf_t', param%niter, 5, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_andf_sigma', param%sigma, 6*max(dx, dy, dz), iter*1.0)
-                    param%sigma = param%sigma/max(dx, dy, dz)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_andf_sigma', param%sigma, 6*maxval(href), iter*1.0)
+                    param%sigma = param%sigma/maxval(href)
                     call readpar_xfloat(file_parameter, tidy(name)//'_andf_alpha', param%lambda1, 1.0e-3, iter*1.0)
                     call readpar_xfloat(file_parameter, tidy(name)//'_andf_beta', param%lambda2, 1.0, iter*1.0)
                     call readpar_xfloat(file_parameter, tidy(name)//'_andf_gamma', param%lambda3, 1.0, iter*1.0)
@@ -525,10 +535,10 @@ contains
                     end if
 
                 case ('medianfilt')
-                    call readpar_xfloat(file_parameter, tidy(name)//'_medianfilt_lon', w_medianfiltx, dx, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_medianfilt_lat', w_medianfilty, dy, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_medianfilt_depth', w_medianfiltz, dz, iter*1.0)
-                    w = median_filt(w, nint([w_medianfiltz/dz, w_medianfilty/dy, w_medianfiltx/dx]))
+                    call readpar_xfloat(file_parameter, tidy(name)//'_medianfilt_lon', w_medianfiltx, href(1), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_medianfilt_lat', w_medianfilty, href(2), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_medianfilt_depth', w_medianfiltz, href(3), iter*1.0)
+                    w = median_filt(w, nint([w_medianfiltz/href(3), w_medianfilty/href(2), w_medianfiltx/href(1)]))
 
                 case ('maxbal')
                     if (maxval(abs(w)) /= 0) then
@@ -541,8 +551,8 @@ contains
                     end if
 
                 case ('rmsbal_lon')
-                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_lon', w_rmsbalx, 1.0*dx, iter*1.0)
-                    wrx = nint(w_rmsbalx/dx)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_lon', w_rmsbalx, 1.0*href(1), iter*1.0)
+                    wrx = nint(w_rmsbalx/href(1))
                     if (mod(wrx, 2) == 0) then
                         wrx = wrx - 1
                     end if
@@ -556,8 +566,8 @@ contains
                     w = return_normal(w)
 
                 case ('rmsbal_lat')
-                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_lat', w_rmsbaly, 1.0*dy, iter*1.0)
-                    wry = nint(w_rmsbaly/dy)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_lat', w_rmsbaly, 1.0*href(2), iter*1.0)
+                    wry = nint(w_rmsbaly/href(2))
                     if (mod(wry, 2) == 0) then
                         wry = wry - 1
                     end if
@@ -571,13 +581,13 @@ contains
                     w = return_normal(w)
 
                 case ('rmsbal_lonlat')
-                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_lon', w_rmsbalx, 1.0*dx, iter*1.0)
-                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_lat', w_rmsbaly, 1.0*dy, iter*1.0)
-                    wrx = nint(w_rmsbalx/dx)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_lon', w_rmsbalx, 1.0*href(1), iter*1.0)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_lat', w_rmsbaly, 1.0*href(2), iter*1.0)
+                    wrx = nint(w_rmsbalx/href(1))
                     if (mod(wrx, 2) == 0) then
                         wrx = wrx - 1
                     end if
-                    wry = nint(w_rmsbaly/dy)
+                    wry = nint(w_rmsbaly/href(2))
                     if (mod(wry, 2) == 0) then
                         wry = wry - 1
                     end if
@@ -593,8 +603,8 @@ contains
                     w = return_normal(w)
 
                 case ('rmsbal_depth')
-                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_depth', w_rmsbalz, 1.0*dz, iter*1.0)
-                    wrz = nint(w_rmsbalz/dz)
+                    call readpar_xfloat(file_parameter, tidy(name)//'_rmsbal_depth', w_rmsbalz, 1.0*href(3), iter*1.0)
+                    wrz = nint(w_rmsbalz/href(3))
                     if (mod(wrz, 2) == 0) then
                         wrz = wrz - 1
                     end if

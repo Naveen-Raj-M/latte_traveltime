@@ -5,3 +5,4 @@ step1/test_spherical
 *.o
 __pycache__/
 step3/test_gradient_fd
+step4/test_filters

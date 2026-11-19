@@ -23,6 +23,7 @@ module regularization
     use parameters
     use vars
     use utility
+    use spherical_filter
 
     implicit none
 
@@ -31,11 +32,22 @@ contains
     !
     !> Solve the Tikhonov regularization in a hard way:
     !>        Decompose the inversion using ADMM, and then solve
-    !>             ||\nabla u||_2^2 = ||u-m^{k+1}||_2^2.
-    !>        The first-order optimality condition of the above
-    !>        equation is
-    !>             \nabla^T \nabla u = u - m^{k+1},
-    !>        which can be solved using the Gauss-Seidel method.
+    !>             min_u  lambda ||grad u||^2 + ||u - m||^2,
+    !>        both norms integrated over the volume. The first-order
+    !>        optimality condition is
+    !>             -lambda div(grad u) + u = m,
+    !>        which is solved using the Gauss-Seidel method.
+    !>
+    !> Spherical branch: the Laplacian is the exact finite-volume one of the
+    !> spherical cells. For a node with cell volume V, its neighbours n, the
+    !> area A_n of the face shared with each and the arc length h_n to it,
+    !> one Gauss-Seidel update is
+    !>
+    !>     u = (V m + lambda sum_n c_n u_n) / (V + lambda sum_n c_n),  c_n = A_n/h_n,
+    !>
+    !> with no neighbour across the boundary of the grid. lambda is a squared
+    !> length (model length unit squared). In a Cartesian grid of unit cells
+    !> this is the update of the Cartesian LATTE.
     !
     function tikhonov_denoise(m, tikhonov_lambda) result(u)
 
@@ -44,84 +56,80 @@ contains
         real, allocatable, dimension(:, :, :) :: u
 
         real, allocatable, dimension(:, :, :) :: pu
+        double precision, allocatable, dimension(:, :) :: vol, clon, csouth, cnorth, cup, cdown
         integer :: i, j, k, iter
-        real :: sumu
         integer :: n1, n2, n3, niter
-        integer :: i1, i2, j1, j2, k1, k2
-        integer :: ii1, ii2, jj1, jj2, kk1, kk2
-        real :: mu
+        double precision :: num, den, lam
 
         u = m
-        mu = 1.0
         niter = 200
+        lam = dble(tikhonov_lambda)
+
+        ! Model order: i along depth, j along latitude, k along longitude
         n1 = size(u, 1)
         n2 = size(u, 2)
         n3 = size(u, 3)
 
-        ! TGpV iteration
+        ! Cell volumes and face coefficients A/h, which do not depend on longitude
+        allocate (vol(n1, n2), clon(n1, n2), csouth(n1, n2), cnorth(n1, n2), cup(n1, n2), cdown(n1, n2))
+        do j = 1, n2
+            do i = 1, n1
+                vol(i, j) = cell_volume(j, i)
+                clon(i, j) = face_weight_lon(j, i)*vol(i, j)/arc_lon(j, i)
+                csouth(i, j) = 0.0d0
+                cnorth(i, j) = 0.0d0
+                cup(i, j) = 0.0d0
+                cdown(i, j) = 0.0d0
+                if (j > 1) then
+                    csouth(i, j) = face_weight_lat(j, j, i)*vol(i, j)/arc_lat(j - 1, j, i)
+                end if
+                if (j < n2) then
+                    cnorth(i, j) = face_weight_lat(j + 1, j, i)*vol(i, j)/arc_lat(j, j + 1, i)
+                end if
+                if (i > 1) then
+                    cup(i, j) = face_weight_radial(i, j, i)*vol(i, j)/sph_ddepth
+                end if
+                if (i < n1) then
+                    cdown(i, j) = face_weight_radial(i + 1, j, i)*vol(i, j)/sph_ddepth
+                end if
+            end do
+        end do
+
+        ! Gauss-Seidel iterations
         do iter = 1, niter
 
             pu = u
 
-            ! minimization u
             do k = 1, n3
                 do j = 1, n2
                     do i = 1, n1
-
-                        if (i == 1) then
-                            i1 = 0
-                            ii1 = i
-                        else
-                            i1 = 1
-                            ii1 = i-1
+                        num = vol(i, j)*m(i, j, k)
+                        den = vol(i, j)
+                        if (k > 1) then
+                            num = num + lam*clon(i, j)*u(i, j, k - 1)
+                            den = den + lam*clon(i, j)
                         end if
-
-                        if (i == n1) then
-                            i2 = 0
-                            ii2 = i
-                        else
-                            i2 = 1
-                            ii2 = i+1
+                        if (k < n3) then
+                            num = num + lam*clon(i, j)*u(i, j, k + 1)
+                            den = den + lam*clon(i, j)
                         end if
-
-                        if (j == 1) then
-                            j1 = 0
-                            jj1 = j
-                        else
-                            j1 = 1
-                            jj1 = j-1
+                        if (j > 1) then
+                            num = num + lam*csouth(i, j)*u(i, j - 1, k)
+                            den = den + lam*csouth(i, j)
                         end if
-                        if (j == n2) then
-                            j2 = 0
-                            jj2 = j
-                        else
-                            j2 = 1
-                            jj2 = j+1
+                        if (j < n2) then
+                            num = num + lam*cnorth(i, j)*u(i, j + 1, k)
+                            den = den + lam*cnorth(i, j)
                         end if
-
-                        if (k == 1) then
-                            k1 = 0
-                            kk1 = k
-                        else
-                            k1 = 1
-                            kk1 = k-1
+                        if (i > 1) then
+                            num = num + lam*cup(i, j)*u(i - 1, j, k)
+                            den = den + lam*cup(i, j)
                         end if
-                        if (k == n3) then
-                            k2 = 0
-                            kk2 = k
-                        else
-                            k2 = 1
-                            kk2 = k+1
+                        if (i < n1) then
+                            num = num + lam*cdown(i, j)*u(i + 1, j, k)
+                            den = den + lam*cdown(i, j)
                         end if
-
-                        sumu = tikhonov_lambda*( &
-                            + i2*u(ii2, j, k) + i1*u(ii1, j, k) &
-                            + j2*u(i, jj2, k) + j1*u(i, jj1, k) &
-                            + k2*u(i, j, kk2) + k1*u(i, j, kk1)) &
-                            + mu*m(i, j, k)
-
-                        u(i, j, k) = sumu/(mu + (6.0 - (1-i1) - (1-i2) - (1-j1) - (1-j2) - (1-k1) - (1-k2))*tikhonov_lambda)
-
+                        u(i, j, k) = real(num/den)
                     end do
                 end do
             end do
@@ -160,6 +168,10 @@ contains
         real :: sim_smoothx, sim_smoothy, sim_smoothz
         real, allocatable, dimension(:, :, :) :: vp, vs, r
         real :: rmin, rmax
+        real, dimension(1:3) :: href
+
+        ! Reference cell size: east-west, north-south, vertical
+        href = real(reference_spacing())
 
         mt = m
 
@@ -172,7 +184,13 @@ contains
             select case (model_regularization_method(i))
 
                 case ('Tikhonov', 'tikhonov')
-                    call readpar_xfloat(file_parameter, 'reg_tikhonov_lambda', tikhonov_lambda, 10.0, iter*1.0)
+                    ! A squared length; the default is 10 squared cells of the
+                    ! mean size of the reference cell
+                    call readpar_xfloat(file_parameter, 'reg_tikhonov_lambda', tikhonov_lambda, &
+                        10.0*(sum(href)/3.0)**2, iter*1.0)
+                    if (rankid == 0) then
+                        call warn(date_time_compact()//' Tikhonov lambda = '//num2str(tikhonov_lambda, '(es)'))
+                    end if
                     mt = tikhonov_denoise(mt, tikhonov_lambda)
 
                     if (rankid == 0) then
@@ -182,20 +200,20 @@ contains
                 case ('smooth')
                     call readpar_xfloat(file_parameter, 'reg_smooth_lon', reg_smoothx, -1.0, iter*1.0)
                     if (reg_smoothx < 0) then
-                        call readpar_xfloat(file_parameter, 'reg_smooth_lon_'//tidy(name), reg_smoothx, 1.0*dx, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_smooth_lon_'//tidy(name), reg_smoothx, 1.0*href(1), iter*1.0)
                     end if
                     call readpar_xfloat(file_parameter, 'reg_smooth_lat', reg_smoothy, -1.0, iter*1.0)
                     if (reg_smoothy < 0) then
-                        call readpar_xfloat(file_parameter, 'reg_smooth_lat_'//tidy(name), reg_smoothy, 1.0*dy, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_smooth_lat_'//tidy(name), reg_smoothy, 1.0*href(2), iter*1.0)
                     end if
                     call readpar_xfloat(file_parameter, 'reg_smooth_depth', reg_smoothz, -1.0, iter*1.0)
                     if (reg_smoothz < 0) then
-                        call readpar_xfloat(file_parameter, 'reg_smooth_depth_'//tidy(name), reg_smoothz, 1.0*dz, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_smooth_depth_'//tidy(name), reg_smoothz, 1.0*href(3), iter*1.0)
                     end if
                     if (present(smooth_inverse) .and. smooth_inverse) then
-                        mt = 1.0/gauss_filt(1.0/mt, [reg_smoothz/dz, reg_smoothy/dy, reg_smoothx/dx])
+                        mt = 1.0/sph_gauss_filt(1.0/mt, 1, 1, [reg_smoothx, reg_smoothy, reg_smoothz])
                     else
-                        mt = gauss_filt(mt, [reg_smoothz/dz, reg_smoothy/dy, reg_smoothx/dx])
+                        mt = sph_gauss_filt(mt, 1, 1, [reg_smoothx, reg_smoothy, reg_smoothz])
                     end if
                     if (rankid == 0) then
                         call warn(date_time_compact()//' >>>>>>>>>> Smoothing regularization finished. ')
@@ -216,9 +234,9 @@ contains
                 case ('vpvs_similarity')
                     if (name == 'vs') then
 
-                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_lon', sim_smoothx, 5*dx, iter*1.0)
-                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_lat', sim_smoothy, 5*dy, iter*1.0)
-                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_depth', sim_smoothz, 5*dz, iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_lon', sim_smoothx, 5*href(1), iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_lat', sim_smoothy, 5*href(2), iter*1.0)
+                        call readpar_xfloat(file_parameter, 'reg_similarity_smooth_depth', sim_smoothz, 5*href(3), iter*1.0)
                         call readpar_xfloat(file_parameter, 'reg_similarity_vpvs_ratio_min', rmin, min_vpvsratio, iter*1.0)
                         call readpar_xfloat(file_parameter, 'reg_similarity_vpvs_ratio_max', rmax, max_vpvsratio, iter*1.0)
 
@@ -239,8 +257,10 @@ contains
                             r = vp/vs
                         end where
                         r = clip(r, rmin, rmax)
+                        ! Median over the 3 x 3 x 3 cells around each node, then
+                        ! the exact Gaussian
                         r = median_filt(r)
-                        r = gauss_filt(r, [sim_smoothz, sim_smoothy, sim_smoothx]/[dz, dy, dx])
+                        r = sph_gauss_filt(r, 1, 1, [sim_smoothx, sim_smoothy, sim_smoothz])
 
                         where (mt /= 0)
                             vs = vp/r
