@@ -10,6 +10,7 @@ every event at its own latitude and depth. With it, all of `x_eikonal3`,
 | File | What changed |
 |---|---|
 | `src/module_inversion_step_size.f90` | Event longitude and latitude steps are limited in meters: a first step from each event's local length of a degree, then an exact arc-length check of every event's move. Defaults of `step_max_slon` and `step_max_slat` in meters. The largest event move in meters is printed. |
+| `src/3d/module_vars.f90` | Updating `slon`, `slat`, `sdepth` or `st0` without `file_slon`, `file_slat`, `file_sdepth` or `file_st0` stops the program. |
 
 ## Event positions and their gradients
 
@@ -97,12 +98,19 @@ default the grid's range.
 
 ## Starting positions
 
-As in the Cartesian examples, the starting event positions come from the
-model files `file_slon`, `file_slat` and `file_sdepth`, one value per event
-in geometry order. Without such a file, LATTE sets that coordinate of every
-event to 0, as on the main branch. In spherical coordinates that means
-longitude 0 or latitude 0, usually outside the grid. This step does not
-change that behaviour.
+As in the Cartesian examples, the starting event positions and origin times
+come from the model files `file_slon`, `file_slat`, `file_sdepth` and
+`file_st0`, one value per event in geometry order. When one of these
+parameters is updated, TLOC takes its starting values from the file, not
+from the geometry. On the main branch, a missing file silently set that
+parameter of every event to 0. In spherical coordinates that means longitude
+0 or latitude 0, usually outside the grid; for origin times it means 0
+whatever the geometry says. Now, when `slon`, `slat`, `sdepth` or `st0` is
+in `model_update` without its file, the program stops with an error naming
+the missing parameter.
+
+A resumed inversion (`resume_from_iter > 1`) does not need these files: it
+reads the updated values of the previous iteration, as before.
 
 ## Execution changes
 
@@ -110,6 +118,8 @@ change that behaviour.
   defaults.
 - The step-size output prints the largest event move by `slon` and by `slat`
   in meters.
+- `file_slon`, `file_slat`, `file_sdepth` and `file_st0` are required for
+  the parameters being updated, except when resuming.
 
 ## Verification
 

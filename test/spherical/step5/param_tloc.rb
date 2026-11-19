@@ -14,6 +14,7 @@ model_update = slon, slat, sdepth, st0
 file_slon = model/slon_init.bin
 file_slat = model/slat_init.bin
 file_sdepth = model/sdepth_init.bin
+file_st0 = model/st0_init.bin
 dir_record = data
 dir_working = tloc
 niter_max = 12

@@ -196,6 +196,21 @@ contains
                 do i = 1, nmodel
                     ! Models to be updated
                     call readpar_string(file_parameter, 'file_'//tidy(model_name(i)), fname, '')
+                    ! The starting event positions and origin times must be
+                    ! given; a default of 0 would place the events at longitude
+                    ! 0, latitude 0 or depth 0, or set their origin times to 0.
+                    ! A resumed inversion reads the updated values of the
+                    ! previous iteration instead.
+                    if (any(model_name(i) == ['slon  ', 'slat  ', 'sdepth', 'st0   ']) .and. fname == '' &
+                            .and. resume_from_iter <= 1) then
+                        if (rankid == 0) then
+                            call warn(date_time_compact()//' <prepare_model> Error: file_'//tidy(model_name(i)) &
+                                //' is required: it holds the starting '//tidy(model_name(i)) &
+                                //' of every event, one value per event in geometry order. Exiting. ')
+                        end if
+                        call mpibarrier
+                        call mpistop
+                    end if
                     call prepare_model_single_parameter(model_m(i)%array, model_name(i), fname, update=.true.)
 
                     model_m(i)%name = model_name(i)

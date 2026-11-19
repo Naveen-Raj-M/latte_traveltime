@@ -217,10 +217,23 @@ centres, with amplitudes of +5.6% and -5.8%. A run with
 ### End-to-end TLOC
 
 The same model and data, with the 9 events at their true positions but with
-origin times of 0.3 s instead of 0. `x_tloc3` updated Vp and origin times.
+starting origin times of 0.3 s instead of 0, given in `file_st0`. `x_tloc3`
+updated Vp and origin times from the starting velocity model.
 
 | Iteration | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|---|
-| Misfit, relative | 1.000 | 0.564 | 0.364 | 0.337 | 0.337 | 0.211 | 0.183 |
+| Misfit, relative | 1.000 | 0.385 | 0.227 | 0.118 | 0.077 | 0.054 | 0.046 |
 
-The origin times ended between 0.001 and 0.029 s, against the true 0.
+After 6 iterations the origin times were between 0.068 and 0.084 s, against
+the true 0 and the starting 0.3 s, and still converging. Their remaining
+offsets are nearly equal; with Vp updated at the same time, part of a common
+origin-time shift is absorbed by the velocity model.
+
+**Correction.** An earlier version of this test, and of this section, gave
+the 0.3 s starting times only in the geometry, without `file_st0`. When
+`st0` is updated, TLOC takes the starting origin times from the `st0` model,
+not from the geometry, and without the file that model was 0, the true
+value. That run therefore started at the true origin times; its reported
+end values of 0.001 to 0.029 s were drift from 0, not recovery from 0.3 s.
+Since step 5, `file_st0` is required when `st0` is updated, and the test
+gives it.

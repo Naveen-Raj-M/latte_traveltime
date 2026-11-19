@@ -9,7 +9,8 @@ geometry_true: the events at their true positions, for the synthetic data.
 geometry_init: the same events moved by 3 to 6 km east and north (in
 opposite senses for alternate events) and 3 km in depth, origin time 0.
 model/slon_init.bin, slat_init.bin and sdepth_init.bin hold these moved
-positions, the starting positions of TLOC. events_true.txt lists the true
+positions, the starting positions of TLOC, and model/st0_init.bin the
+starting origin times, the true 0. events_true.txt lists the true
 positions.
 """
 import os
@@ -63,3 +64,5 @@ write('geometry_init', init)
 init[:, 0].astype(np.float32).tofile('model/slon_init.bin')
 init[:, 1].astype(np.float32).tofile('model/slat_init.bin')
 init[:, 2].astype(np.float32).tofile('model/sdepth_init.bin')
+# Starting origin times: the true 0
+np.zeros(len(init), dtype=np.float32).tofile('model/st0_init.bin')

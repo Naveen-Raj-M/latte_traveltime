@@ -21,7 +21,7 @@ lflags=$(printf 'include $(flitdir)/src/Makefile.in\nprint:\n\t@echo $(base_lfla
 
 cd "$here"
 mpiifx -O2 -fpp -qmkl -qopenmp -heap-arrays -I"$objdir" -I"$flitdir/lib" test_gradient_fd.f90 \
-    "$objdir/module_spherical.o" "$objdir/module_parameters.o" "$objdir/module_vars.o" \
+    "$objdir/module_spherical.o" "$objdir/module_spherical_filter.o" "$objdir/module_parameters.o" "$objdir/module_vars.o" \
     "$objdir/module_utility.o" "$objdir/module_traveltime_iso.o" \
     "$flitdir/lib/libflit.a" $lflags -o test_gradient_fd
 ./test_gradient_fd 2>&1 | grep -v "Fast sweeping\|Wall-clock"

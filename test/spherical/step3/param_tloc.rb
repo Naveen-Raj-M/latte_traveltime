@@ -9,6 +9,7 @@ olat = 20
 ns = 9
 file_geometry = geometry_tloc/geometry.txt
 model_update = vp, st0
+file_st0 = model/st0_init.bin
 file_vp = model/vp_init.bin
 dir_record = data
 dir_working = tloc
